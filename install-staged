@@ -1,0 +1,165 @@
+#!/bin/bash
+
+# NAME
+#
+# install-staged - install from installation staging directories
+#
+# SYNOPSIS
+#
+# install-staged I<PREFIX>
+#
+# DESCRIPTION
+#
+# This script copies parts of the ROSE build tree to the installation
+# prefix directory.  This script should be invoked with the current
+# working directory set to the top of a ROSE build tree.
+#
+# This script depends on the presense of either "patchelf" or
+# "chrpath" in order to rewrite rpath information in dynamically
+# linked executables.
+#
+set -e
+arg0="${0##*/}"
+
+die() {
+    echo "$arg0: $*" >&2
+    exit 1
+}
+
+[ "$#" -eq 1 ] || die "invalid usage"
+prefix=$(realpath "$1")
+[ -d install-staging ] || die "no ./install-staging directory"
+
+# The program we can use to change the rpath that's embedded in a
+# dynamically linked ELF executable. The patchelf tool is a bit slower
+# than chrpath but can handle more cases, so we prefer it.  We don't
+# report any errors here yet, but rather wait to see if we're actually
+# installing any dynamically linked executables.
+if [ "$rpath_changer" = "" ]; then
+    if patchelf --version >/dev/null 2>&1; then
+	rpath_changer=patchelf
+    elif chrpath --version >/dev/null 2>&1; then
+	rpath_changer=chrpath
+    fi
+fi
+
+# Returns the current rpath for the given shared ELF executable.
+# The return value is a colon-separated list of directory names.
+current_rpath() {
+    local file="$1"
+    case "$rpath_changer" in
+	patchelf)
+	    patchelf --print-rpath "$file"
+	    ;;
+	chrpath)
+	    chrpath --list "$file" |cut -d= -f2-
+	    ;;
+	skip)
+	    : no path
+	    ;;
+	*)
+	    (
+		#     --------------------------------------------------------------------------------
+		echo "$arg0: error: patchelf or chrpath required but not found."
+		echo "   The patchelf or chrpath program is needed in order to rewrite the rpath info"
+		echo "   in executables that use dynamic linking. The rpath mechanism allows the"
+		echo "   executable to find the ROSE shared library (librose.so) when that library is"
+		echo "   not installed in a standard, system-wide location.  These ELF tools are often"
+		echo "   available in your system package manager (e.g., Debian/Ubuntu/Mint users can"
+		echo "   run \"sudo apt-get install patchelf\").  If you would rather skip the rpath"
+		echo "   rewriting step and use some other method (such as LD_LIBRARY_PATH) then"
+		echo "   export \"rpath_changer=skip\" when doing this install. Note that the method"
+		echo "   of using LD_LIBRARY_PATH is not recommended for ROSE tools because it can"
+		echo "   adversely affect the behavior of the back-end compiler tools."
+		echo
+		echo "$arg0: instalation aborted."
+	    ) >&2
+	    exit 1
+	    ;;
+    esac
+}
+
+# Replace the rpath in the specified file with the new specified rpath.
+replace_rpath() {
+    local file="$1" rpath="$2"
+    case "$rpath_changer" in
+	patchelf)
+	    patchelf --set-rpath "$rpath" "$file"
+	    ;;
+	chrpath)
+	    # Excessivly noisy command
+	    chrpath --replace "$rpath" "$file" >/dev/null
+	    ;;
+	skip)
+	    : nothing
+	    ;;
+	*)
+	    die "patchelf or chrpath required but not found"
+	    ;;
+    esac
+}
+
+for manifest in $(find install-staging -name MANIFEST); do
+
+    # Directory containing the MANIFEST file
+    manifest_dir="${manifest%/MANIFEST}"
+
+    # Which subdir of install-staging is the $manifest_dir?
+    subdir="${manifest_dir#install-staging/}"
+
+    # Destination directory is where we're going to place the file, so make sure it exists.
+    destdir="$prefix/$subdir"
+    mkdir -p "$destdir"
+
+    # Process all the file names in the MANIFEST.
+    for file in $(cat "$manifest"); do
+
+	# srcfile is the path of the file to be copied.
+	srcfile="$manifest_dir/$file"
+
+	# filetgt is the base name of the destination file. We need to remove
+	# any ".preinstall" extensions that might be present.
+	filetgt="${srcfile##*/}"
+	filetgt="${filetgt%.preinstall}"
+
+	# dstfile is the path of the destination file
+	dstfile="$destdir/$filetgt";
+
+	# copy the file, but only if the destination doesn't exist or is older than the source.
+	if [ ! -e "$dstfile" -o "$srcfile" -nt "$dstfile" ]; then
+	    echo "INSTALL $dstfile"
+	    cp --dereference -p "$srcfile" "$dstfile"
+
+	    # If the file is a dynamically linked ELF executable we may need to change
+	    # the rpath location for librose.so. We don't want to change the copy that's in our build
+	    # tree, so we copied it first.
+	    case "$dstfile" in
+		*.so|*.h|*.a)
+		    : definitely not a shared ELF executable
+		    ;;
+		*)
+		    if file "$dstfile" |grep ': ELF' |grep 'shared object' >/dev/null 2>&1; then
+			old_rpath_string=$(current_rpath "$dstfile")
+			old_rpath=($(echo "$old_rpath_string" |tr : ' '))
+
+			# Transforms the rpath string on stdin by replacing the component where
+			# librose.so was built with the installation directory of librose.so, and
+			# also removing those components that were added for padding.
+			new_rpath=()
+			for rpath_component in "${old_rpath[@]}"; do
+			    if [ "$rpath_component" = "$RG_BLD/src" ]; then
+				new_rpath=("${new_rpath[@]}" "$prefix/lib")
+			    elif $(echo "$rpath_component" | egrep '^(X{96}|Y{96}|Z{96})$' >/dev/null); then
+				: this was our padding
+			    else
+				new_rpath=("${new_rpath[@]}" "$rpath_component")
+			    fi
+			done
+			new_rpath_string="$(echo "${new_rpath[@]}" |tr ' ' :)"
+			replace_rpath "$dstfile" "$new_rpath_string"
+		    fi
+		    ;;
+	    esac
+	fi
+    done
+done

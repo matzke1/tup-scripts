@@ -1,0 +1,188 @@
+#!/bin/bash
+# This is a test script for running a test from a Tupfile
+set -e
+arg0="${0##*/}"
+
+# Defaults
+timeout=15m
+output_file=
+answer_file=
+disabled=
+filter=cat
+
+########################################################################################################################
+usage() {
+    #     --------------------------------------------------------------------------------
+    echo "usage: $arg0 [SWITCHES] COMMAND..."
+    echo "  Runs COMMAND... as a test, and does various other things with it."
+    echo
+    echo "  Switches"
+    echo "    --answer=FILE"
+    echo "        Specifies an existing file to which the COMMAND... standard output is"
+    echo "        compared. If there are differences, they are shown (with \"diff -u\")"
+    echo "        and the command is deemed to have failed."
+    echo
+    echo "    --disabled=REASON"
+    echo "        Marks this test as being disabled. As far as the build system is"
+    echo "        concerned, the test passes. However, it prints the disablement message"
+    echo "        to the tty in red text."
+    echo
+    echo "    -f FILTER | --filter=FILTER"
+    echo "        Run the specified filter command on standard output. If an answer is"
+    echo "        given (--answer) then also run the filter on the answer file before"
+    echo "        comparing with the output. The filter should read standard input and"
+    echo "        write to standard output. The default is \"$filter\"."
+    echo
+    echo "    -o OUTPUT | --output=OUTPUT"
+    echo "        The result of running COMMAND... is stored in the specified file. If"
+    echo "        the command failed, then the output is also echoed.  The standard output"
+    echo "        appears first, followed by the line \"======== CUT ========\" followed"
+    echo "        by the standard error. This switch is required."
+    echo
+    echo "    --timeout=DURATION"
+    echo "        If the COMMAND... does not exit within the specified DURATION then it"
+    echo "        is forcibly terminated and considered to have failed.  The DURATION is"
+    echo "        a positive integer followed by the suffix \"s\", \"m\", or \"h\" for"
+    echo "        seconds, minutes, or hours. Lack of a suffix is the same as \"s\". The"
+    echo "        default is ${timeout}."
+    echo
+    echo "  Exit status"
+    echo "    0:   command succeeded within allowed time, or was disabled"
+    echo "    124: command timed out"
+    echo "    125: standard output differed from precomputed answer"
+    echo "    127: command exit status was 124 or greater"
+}
+
+########################################################################################################################
+# Print error and exit
+die() {
+    echo "$arg0:" "$@" >&2
+    exit 1
+}
+
+########################################################################################################################
+# Parse command-line
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+	--)
+	    shift
+	    break
+	    ;;
+	--answer)
+	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
+	    answer_file="$2"
+	    shift 2
+	    ;;
+	--answer=*)
+	    answer_file="${1#--answer=}"
+	    shift
+	    ;;
+	--disabled)
+	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
+	    disabled="$2"
+	    shift 2
+	    ;;
+	--disabled=*)
+	    disabled="${1#--disabled=}"
+	    shift
+	    ;;
+	-f|--filter)
+	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
+	    filter="$2"
+	    shift 2
+	    ;;
+	-f*)
+	    filter="${1#-f}"
+	    shift
+	    ;;
+	--filter=*)
+	    filter="${1#--filter=}"
+	    shift
+	    ;;
+	-h|--help)
+	    usage
+	    exit 0
+	    ;;
+	-o|--output)
+	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
+	    output_file="$2"
+	    shift 2
+	    ;;
+	-o*)
+	    output_file="${1#-o}"
+	    shift
+	    ;;
+	--output=*)
+	    output_file="${1#--output=}"
+	    shift
+	    ;;
+	--timeout)
+	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
+	    timeout="$2"
+	    shift 2
+	    ;;
+	--timeout=*)
+	    timeout="${1#--timeout=}"
+	    shift
+	    ;;
+	-*)
+	    die "unknown switch \"$1\""
+	    ;;
+	*)
+	    break
+	    ;;
+    esac
+done
+[ -n "$output_file" ] || die "no output name specified (see --output)"
+
+# Check for being disabled.
+if [ -n "$disabled" ]; then
+    echo -ne '\033[31;1m'
+    echo -n "This test is disabled ($disabled)"
+    echo -e '\033[0m'
+    echo "This test is disabled ($disabled)" >"$output_file"
+    exit 0
+fi
+
+# Run the command, capturing it's output. This uses the "timeout" command from coreutils.
+temp_stdout=$(tempfile)
+temp_stderr=$(tempfile)
+temp_cmd=$(tempfile)
+echo "$@" >"$temp_cmd"
+
+set +e
+(
+    echo "+" "$@" >&2
+    timeout --foreground --kill-after=1m "$timeout" bash $temp_cmd |$filter
+    exit ${PIPESTATUS[0]}
+) >"$temp_stdout" 2>"$temp_stderr"
+exit_status=$?
+rm -f "$temp_cmd"
+set -e
+(cat "$temp_stdout"; echo "======== CUT ========"; cat "$temp_stderr") > "$output_file"
+
+# If an answer file was supplied, compare the command standard output with the answer.
+error=
+if [ "$exit_status" -eq 124 ]; then
+    error="command timed out after $timeout"
+elif [ "$exit_status" -ne 0 ]; then
+    error="command failed with exit status $exit_status"
+    [ "$exit_status" -ge 124 ] && exit_status=127
+elif [ -n "$answer_file" ]; then
+    temp_answer=$(tempfile)
+    $filter <"$answer_file" >"$temp_answer"
+    echo "+ diff -u $answer_file COMMAND_STDOUT" >>"$output_file"
+    echo "+ filtering with $filter" >>"$output_file"
+    if ! diff -u "$temp_answer" "$temp_stdout" >> "$output_file"; then
+	error="Result differs from precomputed answer"
+	exit_status=125
+    fi
+fi
+
+# Show output?
+if [ -n "$error" ]; then
+    echo "$arg0: $error" >&2
+    cat "$output_file"
+fi
+
+exit "$exit_status"
