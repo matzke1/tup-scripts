@@ -381,7 +381,7 @@ if ($link_mode eq "exe") {
 	}
     }
     if ($output eq "") {
-	$output = TupScripts::base_name_no_ext($inputs[0]) . ".so";
+	$output = "lib" . TupScripts::base_name_no_ext($inputs[0]) . ".so";
     } else {
 	$output .= ".so" unless $output =~ /\.so$/;
 	$output = "lib" . $output unless $output =~ /^lib/;
