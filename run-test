@@ -179,9 +179,24 @@ elif [ -n "$answer_file" ]; then
     fi
 fi
 
+# Add some extra usage info to the end of the file if there was an error
+if [ -n "$error" ]; then
+    # Something we can easily grep (e.g., "grep TEST_FAILED *.result")
+    echo "TEST_FAILED $output_file" >>"$output_file"
+
+    # If a comparison test failed, how can an expert review the differences and possibly accept them?
+    if [ -n "$answer_file" ]; then
+	(
+	    echo
+	    echo "To review and possibly accept the new output as an answer, run:"
+	    echo "   validate-answer --filter=\"$filter\" --answer=\"$answer_file\" $output_file"
+	) >>"$output_file"
+    fi
+fi    
+
 # Show output?
 if [ -n "$error" ]; then
-    echo "$arg0: $error" >&2
+    echo "$arg0: $output_file: $error" >&2
     cat "$output_file"
 fi
 
