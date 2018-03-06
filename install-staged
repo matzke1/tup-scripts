@@ -1,34 +1,83 @@
 #!/bin/bash
-
-# NAME
-#
-# install-staged - install from installation staging directories
-#
-# SYNOPSIS
-#
-# install-staged I<PREFIX>
-#
-# DESCRIPTION
-#
-# This script copies parts of the ROSE build tree to the installation
-# prefix directory.  This script should be invoked with the current
-# working directory set to the top of a ROSE build tree.
-#
-# This script depends on the presense of either "patchelf" or
-# "chrpath" in order to rewrite rpath information in dynamically
-# linked executables.
-#
 set -e
 arg0="${0##*/}"
+
+usage() {
+    echo "NAME"
+    echo
+    echo "  $arg0 - install from installation staging directories"
+    echo
+    echo "SYNOPSIS"
+    echo
+    echo "  $arg0 [SWITCHES] PREFIX"
+    echo
+    echo "DESCRIPTION"
+    echo
+    echo "  This script copies parts of the build tree to the installation prefix"
+    echo "  directory. This script should be invoked with the current working directory"
+    echo "  set to the top of the build tree. It  recursively copies files found under the"
+    echo "  install-staging directory to the same subdirectories (created if necessary)"
+    echo "  under the install prefix. Any files named \"MANIFEST\" are not copied, but"
+    echo "  instead contain a white-space separated list of files to copy from the build"
+    echo "  directory to the installation prefix."
+    echo 
+    echo "  This script depends on the presense of either \"patchelf\" or \"chrpath\" in"
+    echo "  order to rewrite rpath information in dynamically linked executables."
+    echo
+    echo "SWITCHES"
+    echo
+    echo "  --remove PATH | -d PATH"
+    echo "      Paths to remove from rpaths. These are usually directories in the build"
+    echo "      tree."
+}
 
 die() {
     echo "$arg0: $*" >&2
     exit 1
 }
 
+remove_paths=()
+verbose=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+	--)
+	    shift
+	    break
+	    ;;
+	--debug|--verbose|-v)
+	    verbose=yes
+	    shift
+	    ;;
+	--help|-h)
+	    usage
+	    exit 0
+	    ;;
+	--remove|-d)
+	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
+	    remove_paths=("${remove_paths[@]}" "$1")
+	    shift 2
+	    ;;
+	--remove=*)
+	    remove_paths=("${remove_paths[@]}" "${1#--remove=}")
+	    shift
+	    ;;
+	-d*)
+	    remove_paths=("${remove_paths[@]}" "${1#-d}")
+	    shift
+	    ;;
+	-*)
+	    die "unknown command-line switch \"$1\""
+	    ;;
+	*)
+	    break
+	    ;;
+    esac
+done
+
 [ "$#" -eq 1 ] || die "invalid usage"
 prefix=$(realpath "$1")
 [ -d install-staging ] || die "no ./install-staging directory"
+new_paths=("$prefix/lib")
 
 # The program we can use to change the rpath that's embedded in a
 # dynamically linked ELF executable. The patchelf tool is a bit slower
@@ -63,14 +112,15 @@ current_rpath() {
 		echo "$arg0: error: patchelf or chrpath required but not found."
 		echo "   The patchelf or chrpath program is needed in order to rewrite the rpath info"
 		echo "   in executables that use dynamic linking. The rpath mechanism allows the"
-		echo "   executable to find the ROSE shared library (librose.so) when that library is"
+		echo "   executable to find shared librar for this project when that library is"
 		echo "   not installed in a standard, system-wide location.  These ELF tools are often"
 		echo "   available in your system package manager (e.g., Debian/Ubuntu/Mint users can"
 		echo "   run \"sudo apt-get install patchelf\").  If you would rather skip the rpath"
 		echo "   rewriting step and use some other method (such as LD_LIBRARY_PATH) then"
 		echo "   export \"rpath_changer=skip\" when doing this install. Note that the method"
-		echo "   of using LD_LIBRARY_PATH is not recommended for ROSE tools because it can"
-		echo "   adversely affect the behavior of the back-end compiler tools."
+		echo "   of using LD_LIBRARY_PATH is not recommended for project's programs that"
+		echo "   run non-project sub-programs because it can adversely affect the behavior of"
+		echo "   the sub-program."
 		echo
 		echo "$arg0: instalation aborted."
 	    ) >&2
@@ -99,6 +149,7 @@ replace_rpath() {
     esac
 }
 
+build_dir=$(pwd)
 for manifest in $(find install-staging -name MANIFEST); do
 
     # Directory containing the MANIFEST file
@@ -142,19 +193,43 @@ for manifest in $(find install-staging -name MANIFEST); do
 			old_rpath_string=$(current_rpath "$dstfile")
 			old_rpath=($(echo "$old_rpath_string" |tr : ' '))
 
-			# Transforms the rpath string on stdin by replacing the component where
-			# librose.so was built with the installation directory of librose.so, and
-			# also removing those components that were added for padding.
 			new_rpath=()
-			for rpath_component in "${old_rpath[@]}"; do
-			    if [ "$rpath_component" = "$RG_BLD/src" ]; then
-				new_rpath=("${new_rpath[@]}" "$prefix/lib")
-			    elif $(echo "$rpath_component" | egrep '^(X{96}|Y{96}|Z{96})$' >/dev/null); then
-				: this was our padding
+			inserted=
+			for old_dir in "${old_rpath[@]}"; do
+ 			    new_dir="$old_dir"
+			    if $(echo "$old_dir" | egrep '^(X{96}|Y{96}|Z{96})$' >/dev/null); then
+				# Remove padding paths
+				new_dir=
+			    elif [ "${#remove_paths[*]}" -eq 0 ]; then
+				# If the user didn't specify any paths to remove, remove those that have the build directory
+				# as a prefix or which don't start with a slash.
+				if [ "${old_dir#$build_dir}" != "$old_dir" ]; then
+				    new_dir=
+				elif [ "${old_dir#/}" = "$old_dir" ]; then
+				    new_dir=
+				fi
 			    else
-				new_rpath=("${new_rpath[@]}" "$rpath_component")
+				# Remove the paths that the user wants to have removed
+				for user in "${remove_paths[@]}"; do
+				    if [ "$old_dir" = "$user" ]; then
+					new_dir=
+					break
+				    fi
+				done
+			    fi
+
+			    if [ "$new_dir" != "" ]; then
+				[ -n "$verbose" ] && echo "  $old_dir -> $new_dir" >&2
+				new_rpath=("${new_rpath[@]}" "$new_dir")
+			    elif [ "$inserted" = "" ]; then
+				[ -n "$verbose" ] && echo "  $old_dir -> INSTALLATION_PREFIX" >&2
+				new_rpath=("${new_rpath[@]}" "${new_paths[@]}")
+				inserted=yes
+			    else
+				[ -n "$verbose" ] && echo "  $old_dir -> DELETED" >&2
 			    fi
 			done
+
 			new_rpath_string="$(echo "${new_rpath[@]}" |tr ' ' :)"
 			replace_rpath "$dstfile" "$new_rpath_string"
 		    fi
