@@ -65,6 +65,8 @@ sub language {
     return "shell"   	if $file =~ /\.sh$/;
     return "object"  	if $file =~ /\.o$/;
     return "executable" if $file =~ /\.exe$/;
+    return "qtui"       if $file =~ /\.ui$/;    # Qt GUI description file (XML) from Qt's "designer" tool
+    return "qtrc"       if $file =~ /\.qrc$/;   # Qt Resource description file (XML) from Qt's "creator" tool
     return $1           if $file =~ /\.([^\/]+)$/;
     return "";
 }
@@ -85,7 +87,17 @@ sub is_library {
 sub is_object {
     return language($_[0]) eq "object";
 }
-    
+
+# True if file is a Qt UI file. I.e., XML generated from Qt's "designer" program.
+sub is_qt_ui {
+    return language($_[0]) eq "qtui";
+}
+
+# True if file is a Qt resource description file generated from Qt's "creator" program.
+sub is_qt_resource {
+    return language($_[0]) eq "qtrc";
+}
+
 # Organize source file names by language. Return value is a hash
 # indexed by the language and whose value is an array reference for
 # the corresponding source file names.
