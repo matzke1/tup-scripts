@@ -473,7 +473,7 @@ for my $lang (keys %sources) {
     }
 
     print ": foreach ", join(" ", @{$sources{$lang}});
-    print " | ", join(" ", @order_inputs) if @order_inputs;
+    print " | ", join(" ", TupScripts::fix_bin(@order_inputs)) if @order_inputs;
     print " |> !${compile_macro}";
     for my $arg (@compiler_args) {
 	print " ", TupScripts::shell_escape($arg);
@@ -502,6 +502,7 @@ if ($link_mode ne "none") {
     print " ", join(" ", @{$sources{object}}) if $sources{object};
     print " ", join(" ", @{$sources{library}}) if $sources{library};
     print " |> !${link_macro}";
+    print " ", join(" ", @linker_args) if @linker_args;
     print " |> ${output}";
     print " ${group}" if $group;
     print " \$(ROOT)/\$(INSTALL_STAGING)/$install_dir/<staging>" if $install_dir ne "none";

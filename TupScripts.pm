@@ -98,6 +98,20 @@ sub is_qt_resource {
     return language($_[0]) eq "qtrc";
 }
 
+# Fix bin names so "{foo}.C" becomes just "{foo}". The ".C" is necessary because it
+# tells various tup-scripts that the bin contains *.C files.
+sub fix_bin {
+    my @result;
+    for my $item (@_) {
+	if ($item =~ /^(\{\w+\})\./) {
+	    push @result, $1;
+	} else {
+	    push @result, $item;
+	}
+    }
+    return wantarray ? @result : $result[0];
+}
+
 # Organize source file names by language. Return value is a hash
 # indexed by the language and whose value is an array reference for
 # the corresponding source file names.
@@ -116,7 +130,7 @@ sub by_language {
     for my $file (@_) {
 	my $lang = language($file);
 	$ret{$lang} ||= [];
-	push @{$ret{$lang}}, $file;
+	push @{$ret{$lang}}, fix_bin $file;
     }
     return %ret;
 }

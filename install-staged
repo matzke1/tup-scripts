@@ -149,6 +149,13 @@ replace_rpath() {
     esac
 }
 
+if [ -n "$verbose" ]; then
+    for dir in "${new_paths[@]}"; do
+	echo "new_path = $dir"
+    done
+fi
+
+
 build_dir=$(pwd)
 for manifest in $(find install-staging -name MANIFEST); do
 
