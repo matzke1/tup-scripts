@@ -514,11 +514,12 @@ my $ncompiled = 0;
 for my $lang (keys %sources) {
     my $compile_macro;                                   # name of macro if we're emitting macros
     my @rule_outputs;                                    # output names for the rule like %B.o, etc.
-    my $uc_lang = uc($lang);                             # upper-case language name like C, D, C++, etc. overridden below
+    my $uc_lang = uc($lang);                             # upper-case language name like CXX, C, D, etc. overridden below
     my $uc_compiler = TupScripts::compiler_exe($lang);   # upper-case compiler name like CXX, CC, etc.
     my @extra_compiler_args;                             # switches, flags, etc. appearing before input file names
 
     if ($lang eq "c++" || $lang eq "c") {
+	$uc_lang = "CXX" if $uc_lang eq "C++";
 	$compile_macro = "${phase}compile_" . lc($uc_compiler);
 	push @extra_compiler_args, "-c";
 	push @rule_outputs, "${output}-%B.o";
