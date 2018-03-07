@@ -553,7 +553,7 @@ for my $lang (keys %sources) {
 	print " ^c ${phase}${uc_compiler} \%f^";
 	print " \$(${phase}${uc_compiler})";
 	print " \$(${phase}CPPFLAGS)" if $lang eq "c++" || $lang eq "c";
-	print " \$(${phase}${uc_compiler}FLAGS)";
+	print " \$(${phase}${uc_lang}FLAGS)";
 	print " ", TupScripts::shell_escape($_) for @compiler_args;
 	print " -o %o";
 	print " ", join(" ", @extra_compiler_args) if @extra_compiler_args;
