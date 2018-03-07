@@ -512,13 +512,15 @@ if ($language) {
 }
 my $ncompiled = 0;
 for my $lang (keys %sources) {
-    my $compile_macro;
-    my @rule_outputs;
-    my $uc_lang = uc($lang);
-    my $uc_compiler = TupScripts::compiler_exe($lang);
-    if ($lang eq "c++") {
-	$uc_lang = "CXX";
-	$compile_macro = "${phase}compile_cxx";
+    my $compile_macro;                                   # name of macro if we're emitting macros
+    my @rule_outputs;                                    # output names for the rule like %B.o, etc.
+    my $uc_lang = uc($lang);                             # upper-case language name like C, D, C++, etc. overridden below
+    my $uc_compiler = TupScripts::compiler_exe($lang);   # upper-case compiler name like CXX, CC, etc.
+    my @extra_compiler_args;                             # switches, flags, etc. appearing before input file names
+
+    if ($lang eq "c++" || $lang eq "c") {
+	$compile_macro = "${phase}compile_" . lc($uc_compiler);
+	push @extra_compiler_args, "-c";
 	push @rule_outputs, "${output}-%B.o";
     } elsif ($lang eq "moc") {
 	$compile_macro = "${phase}compile_moc";
@@ -527,9 +529,11 @@ for my $lang (keys %sources) {
 	$compile_macro = "${phase}compile_${lang}";
 	push @rule_outputs, "${output}-%B.o";
     } elsif (TupScripts::is_qt_ui($sources{$lang}[0])) {
+	$uc_lang = "UIC";
 	$compile_macro = "${phase}compile_${lang}";
 	push @rule_outputs, "ui_%B.h";
     } elsif (TupScripts::is_qt_resource($sources{$lang}[0])) {
+	$uc_lang = "RCC";
 	$compile_macro = "${phase}compile_${lang}";
 	push @rule_outputs, "qrc_%B.C";
     } else {
@@ -549,9 +553,11 @@ for my $lang (keys %sources) {
 	print " ^c ${phase}${uc_compiler} \%f^";
 	print " \$(${phase}${uc_compiler})";
 	print " \$(${phase}CPPFLAGS)" if $lang eq "c++" || $lang eq "c";
-	print " \$(${phase}${uc_lang}FLAGS)";
+	print " \$(${phase}${uc_compiler}FLAGS)";
 	print " ", TupScripts::shell_escape($_) for @compiler_args;
-	print " -o %o -c %f";
+	print " -o %o";
+	print " ", join(" ", @extra_compiler_args) if @extra_compiler_args;
+	print " %f";
     }
 
     # Outputs

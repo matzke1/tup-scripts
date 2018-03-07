@@ -89,6 +89,7 @@ sub compiler_exe {
     return "CXX" if $lang eq "c++" || $lang eq "cxx";
     return "UIC" if $lang eq "qtui";
     return "RCC" if $lang eq "qtrc";
+    return "MOC" if $lang eq "moc";
     return uc($lang) . "C";
 }
 
