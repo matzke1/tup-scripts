@@ -20,6 +20,18 @@ sub help {
   }
 };
 
+# Given a file name, return the directory part. Examples:
+#    /foo/bar  => /foo
+#    /foo/bar/ => /foo/bar
+#    /foo      => empty string
+#    /         => empty string
+#    ./foo     => .
+#    foo       => .
+sub directory_name {
+    return $1 if $_[0] =~ /^(.*)\//;
+    return ".";
+}
+      
 # Given a name in the file system, return the last component. I.e., the non-directory part.
 sub base_name {
     my @components = split /\/+/, $_[0];
