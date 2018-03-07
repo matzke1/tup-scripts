@@ -83,6 +83,15 @@ sub language {
     return "";
 }
 
+# Variable name for the compiler. "CXX" for C++ compilers, "CC" for C compilers, etc.
+sub compiler_exe {
+    my($lang) = @_; # from the &language function
+    return "CXX" if $lang eq "c++" || $lang eq "cxx";
+    return "UIC" if $lang eq "qtui";
+    return "RCC" if $lang eq "qtrc";
+    return uc($lang) . "C";
+}
+
 # True if file is a source language like C or C++
 sub is_source_code {
     my($file) = @_;
