@@ -67,20 +67,21 @@ sub shell_escape {
 # might have incorrect contents). The by-name restriction is because this needs to be called to create Tup rules, which
 # happens before files are created.
 sub language {
-    my($file) = @_;
+    my($dflt, $file) = @_;
 
-    return "c"       	if $file =~ /\.c$/;
-    return "c++"     	if $file =~ /\.(C|cc|cxx|cpp)$/;
-    return "d"       	if $file =~ /\.d$/;
-    return "header"  	if $file =~ /\.(h|hh|H|hpp|hxx)$/;
-    return "library" 	if $file =~ /\.(so|a|dll)$/;
-    return "shell"   	if $file =~ /\.sh$/;
-    return "object"  	if $file =~ /\.o$/;
-    return "executable" if $file =~ /\.exe$/;
-    return "qtui"       if $file =~ /\.ui$/;    # Qt GUI description file (XML) from Qt's "designer" tool
-    return "qtrc"       if $file =~ /\.qrc$/;   # Qt Resource description file (XML) from Qt's "creator" tool
-    return $1           if $file =~ /\.([^\/]+)$/;
-    return "";
+    # Some things are so obvious that we shouldn't use the $dflt
+    return $dflt || "c"       	if $file =~ /\.c$/;
+    return $dflt || "c++"     	if $file =~ /\.(C|cc|cxx|cpp)$/;
+    return $dflt || "d"       	if $file =~ /\.d$/;
+    return $dflt || "header"  	if $file =~ /\.(h|hh|H|hpp|hxx)$/;
+    return "library" 	        if $file =~ /\.(so|a|dll)$/;
+    return $dflt || "shell"   	if $file =~ /\.sh$/;
+    return "object"  	        if $file =~ /\.o$/;
+    return "executable"         if $file =~ /\.exe$/;
+    return $dflt || "qtui"      if $file =~ /\.ui$/;    # Qt GUI description file (XML) from Qt's "designer" tool
+    return $dflt || "qtrc"      if $file =~ /\.qrc$/;   # Qt Resource description file (XML) from Qt's "creator" tool
+    return $dflt || $1          if $file =~ /\.([^\/]+)$/;
+    return $dflt;
 }
 
 # Variable name for the compiler. "CXX" for C++ compilers, "CC" for C compilers, etc.
@@ -96,33 +97,33 @@ sub compiler_exe {
 # True if file is a source language like C or C++
 sub is_source_code {
     my($file) = @_;
-    my($lang) = language($file);
+    my($lang) = language("", $file);
     return ($lang eq "c" || $lang eq "c++" || $lang eq "d" || $lang eq "header");
 }
 
 # True if file is a library, static or shared
 sub is_library {
-    return language($_[0]) eq "library";
+    return language("", $_[0]) eq "library";
 }
 
 # True if file is an object file
 sub is_object {
-    return language($_[0]) eq "object";
+    return language("", $_[0]) eq "object";
 }
 
 # True if file is a Qt UI file. I.e., XML generated from Qt's "designer" program.
 sub is_qt_ui {
-    return language($_[0]) eq "qtui";
+    return language("", $_[0]) eq "qtui";
 }
 
 # True if file is a Qt resource description file generated from Qt's "creator" program.
 sub is_qt_resource {
-    return language($_[0]) eq "qtrc";
+    return language("", $_[0]) eq "qtrc";
 }
 
 # Fix bin names so "{foo}.C" becomes just "{foo}". The ".C" is necessary because it
 # tells various tup-scripts that the bin contains *.C files.
-sub fix_bin {
+sub fix_bins {
     my @result;
     for my $item (@_) {
 	if ($item =~ /^(\{\w+\})\./) {
@@ -132,6 +133,50 @@ sub fix_bin {
 	}
     }
     return wantarray ? @result : $result[0];
+}
+
+# Turn a bin like "{foo}.ext" (the ".ext" is optional) into just "foo". If the pattern isn't matched
+# then return the argument as-is.
+sub make_bin_variable {
+    return $1 if $_[0] =~ /^\{(\w+)\}(\.[^\/]*)?$/;
+    return $_[0];
+}
+
+# Fix group names so "../../<foo>.C" becomes "../../<foo>", without affecting other arguments.
+sub fix_groups {
+    my @result;
+    for my $item (@_) {
+	if ($item =~ /^(.*<\w+>)\.[^\/]*$/) {
+	    push @result, $1;
+	} else {
+	    push @result, $item;
+	}
+    }
+    return wantarray ? @result : $result[0];
+}
+
+# Remove extensions from all groups and bins
+sub fix_groups_bins {
+    return fix_bins fix_groups @_;
+}
+
+# Given a group like "../../<foo>.C" (the path and extension are optional) return just "foo".
+# If the argument doesn't follow this pattern, return the argument as-is.  If the $tup_var is
+# true then return "%<foo>" instead of "foo".
+sub make_group_variable {
+    my($in, $tup_var) = @_;
+    my($var) = $in =~ /<(\w+)>(\.[^\/]*)?$/ ? $1 : $in;
+    $var = "%<$var>" if $tup_var && $var ne $in;
+    return $var;
+}
+	
+# Turn a file, bin, or group into something that's a suitable variable
+sub make_variable {
+    my($v) = make_bin_variable(make_group_variable($_[0]));
+    return $v if $v ne $_[0];
+    $v = base_name_no_ext($v);
+    $v =~ s/\W/_/;
+    return $v;
 }
 
 # Organize source file names by language. Return value is a hash
@@ -148,13 +193,24 @@ sub fix_bin {
 # on file content since it's called with file names that might not
 # actually exist yet (such as when building Tup rules).
 sub by_language {
+    my($dflt, @files) = @_;
     my %ret;
-    for my $file (@_) {
-	my $lang = language($file);
+    for my $file (@files) {
+	my $lang = language($dflt, $file);
 	$ret{$lang} ||= [];
-	push @{$ret{$lang}}, fix_bin $file;
+	push @{$ret{$lang}}, fix_groups fix_bins $file;
     }
     return %ret;
 }
 
+# Given a list of inputs, return a suitable variable, usually "%f".
+sub tup_input_variable {
+    my @inputs = @_;
+    if (@inputs == 1) {
+	my $groupvar = make_group_variable($inputs[0]);
+	return "\%<$groupvar>" if $groupvar ne $inputs[0];
+    }
+    return '%f';
+}
+	
 1;
