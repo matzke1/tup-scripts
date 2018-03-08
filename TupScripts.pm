@@ -175,7 +175,7 @@ sub make_variable {
     my($v) = make_bin_variable(make_group_variable($_[0]));
     return $v if $v ne $_[0];
     $v = base_name_no_ext($v);
-    $v =~ s/\W/_/;
+    $v =~ s/[^-\w]/_/;
     return $v;
 }
 

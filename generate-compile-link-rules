@@ -600,7 +600,7 @@ if ($link_mode ne "none") {
 	$link_macro = "${phase}link_static";
     } elsif ($link_mode eq "shared") {
 	$link_macro = "${phase}linklib_" . linker_language(keys %sources);
-	if ($lang eq 'c++' || $lang eq 'c') {
+	if ($lang eq 'cxx' || $lang eq 'c') {
 	    push @compiler_args, '-shared', '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
 	} elsif ($lang eq 'd') {
 	    push @compiler_args, '-lib', '-of=%o', TupScripts::tup_input_variable(@linker_inputs);
@@ -621,7 +621,7 @@ if ($link_mode ne "none") {
 	my($lib_name) = $lib_basename =~ /^lib(.*)\.(so|a)$/;
 
 	push @linker_order_inputs, $lib unless $lib =~ /^\//; # absolute names are not managed by Tup
-	if ($lang eq 'c++' || $lang eq 'c') {
+	if ($lang eq 'cxx' || $lang eq 'c') {
 	    unshift @linker_args, "-L$lib_dirname", "-Wl,-rpath,$lib_dirname", "-l$lib_name";
 	} elsif ($lang eq 'd') {
 	    unshift @linker_args, $lib, "-L=-rpath", "-L=$lib_dirname";
