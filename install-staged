@@ -75,6 +75,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 [ "$#" -eq 1 ] || die "invalid usage"
+mkdir -p "$1"
 prefix=$(realpath "$1")
 [ -d install-staging ] || die "no ./install-staging directory"
 new_paths=("$prefix/lib")
