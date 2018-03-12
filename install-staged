@@ -156,6 +156,11 @@ if [ -n "$verbose" ]; then
     done
 fi
 
+# Was an installation prefix specified when this project was built?  If so (and we know what it is) we can change it
+# in certain files we install.
+if [ -r tup.config ]; then
+    old_prefix="$(grep CONFIG_INSTALLATION_PREFIX tup.config |cut -d= -f2)"
+fi
 
 build_dir=$(pwd)
 for manifest in $(find install-staging -name MANIFEST); do
@@ -187,16 +192,30 @@ for manifest in $(find install-staging -name MANIFEST); do
 	# copy the file, but only if the destination doesn't exist or is older than the source.
 	if [ ! -e "$dstfile" -o "$srcfile" -nt "$dstfile" ]; then
 	    echo "INSTALL $dstfile"
-	    cp --dereference -p "$srcfile" "$dstfile"
 
-	    # If the file is a dynamically linked ELF executable we may need to change
-	    # the rpath location for librose.so. We don't want to change the copy that's in our build
-	    # tree, so we copied it first.
-	    case "$dstfile" in
-		*.so|*.h|*.a)
-		    : definitely not a shared ELF executable
+ 	    echo "ROBB: dstfile=$dstfile srcfile=$srcfile" >&2
+	    case "$(basename $dstfile)" in
+		rose-installed-*.cfg)
+		    # If the prefix to which we're installing isn't the same as the prefix when ROSE was built, then
+		    # we need to change it to the correct one.
+		    if [ -n "$old_prefix" ]; then
+			sed "s%${old_prefix}%${prefix}%g" <"$srcfile" >"$dstfile"
+			chmod --reference="$srcfile" "$dstfile"
+		    else
+			cp --dereference -p "$srcfile" "$dstfile"
+		    fi
 		    ;;
+
+		*.so|*.h|*.a)
+		    # Copy these files as-is
+		    cp --dereference -p "$srcfile" "$dstfile"
+		    ;;
+
 		*)
+		    # If the file is a dynamically linked ELF executable we may need to change
+		    # the rpath location for librose.so. We don't want to change the copy that's in our build
+		    # tree, so we copy it first.
+		    cp --dereference -p "$srcfile" "$dstfile"
 		    if file "$dstfile" |grep ': ELF' |grep 'shared object' >/dev/null 2>&1; then
 			old_rpath_string=$(current_rpath "$dstfile")
 			old_rpath=($(echo "$old_rpath_string" |tr : ' '))
