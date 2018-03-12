@@ -193,7 +193,6 @@ for manifest in $(find install-staging -name MANIFEST); do
 	if [ ! -e "$dstfile" -o "$srcfile" -nt "$dstfile" ]; then
 	    echo "INSTALL $dstfile"
 
- 	    echo "ROBB: dstfile=$dstfile srcfile=$srcfile" >&2
 	    case "$(basename $dstfile)" in
 		rose-installed-*.cfg)
 		    # If the prefix to which we're installing isn't the same as the prefix when ROSE was built, then
