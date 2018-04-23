@@ -215,7 +215,7 @@ for manifest in $(find install-staging -name MANIFEST); do
 		    # the rpath location for librose.so. We don't want to change the copy that's in our build
 		    # tree, so we copy it first.
 		    cp --dereference -p "$srcfile" "$dstfile"
-		    if file "$dstfile" |grep ': ELF' |grep 'shared object' >/dev/null 2>&1; then
+		    if file "$dstfile" |grep ': ELF' >/dev/null 2>&1; then
 			old_rpath_string=$(current_rpath "$dstfile")
 			old_rpath=($(echo "$old_rpath_string" |tr : ' '))
 
@@ -245,7 +245,11 @@ for manifest in $(find install-staging -name MANIFEST); do
 			    fi
 
 			    if [ "$new_dir" != "" ]; then
-				[ -n "$verbose" ] && echo "  $old_dir -> $new_dir" >&2
+				if [ "$new_dir" = "$old_dir" ]; then
+				    [ -n "$verbose" ] && echo "  $old_dir -> NO_CHANGE" >&2
+				else
+				    [ -n "$verbose" ] && echo "  $old_dir -> $new_dir" >&2
+				fi
 				new_rpath=("${new_rpath[@]}" "$new_dir")
 			    elif [ "$inserted" = "" ]; then
 				[ -n "$verbose" ] && echo "  $old_dir -> INSTALLATION_PREFIX" >&2
