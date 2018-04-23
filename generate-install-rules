@@ -196,6 +196,7 @@ for my $dir (keys %dir_lang_files) {
 	if ($license) {
 	    if ($lang eq 'c' || $lang eq 'c++' || $lang eq 'header' || $lang eq 'shell') {
 		print " \$(ROOT)/scripts/tup/prepend-comment --$lang -w$width $license <%f >%o";
+		print " && chmod --reference=%f %o"
 	    } elsif ($lang eq 'lib') {
 		# do not prepend a license even if one was requested
 	    } elsif ($lang eq "") {
