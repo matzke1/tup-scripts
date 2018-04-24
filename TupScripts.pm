@@ -2,6 +2,7 @@
 package TupScripts;
 use strict;
 use warnings;
+use Cwd;
 
 our($arg0) = $0 =~ m(([^/]+)$);
 
@@ -46,6 +47,14 @@ sub base_name_no_ext {
     my $final = base_name($_[0]);
     $final = $1 if $final =~ /(.*)\./;
     return $final;
+}
+
+# Convert a relative name to an absolute name
+sub absolute_name {
+    my($name, $root) = @_;
+    return $name if $name =~ /^\//;
+    $root = Cwd::cwd() unless $root;
+    return "$root/$name";
 }
 
 # Escape a string for the shell

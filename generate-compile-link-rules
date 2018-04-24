@@ -613,11 +613,12 @@ if ($link_mode ne "none") {
 
     # Library names specified as files, like "../../libfoo.so" need to be passed to the linker as "-L../.. -lfoo" in order
     # to work properly with rpath after being installed, but they need to be listed as "../../libfoo.so" in the rule's
-    # order-only dependencies so that Tup knows about them.
+    # order-only dependencies so that Tup knows about them. Furthermore, the directory names should be absolute so that
+    # the resulting executable can be invoked from any working directory.
     my @linker_order_inputs;
     for my $lib (@{$sources{library}}) {
 	my $lib_basename = TupScripts::base_name($lib);
-	my($lib_dirname) = TupScripts::directory_name($lib);
+	my($lib_dirname) = TupScripts::absolute_name(TupScripts::directory_name($lib));
 	my($lib_name) = $lib_basename =~ /^lib(.*)\.(so|a)$/;
 
 	push @linker_order_inputs, $lib unless $lib =~ /^\//; # absolute names are not managed by Tup
