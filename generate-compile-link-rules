@@ -618,7 +618,7 @@ if ($link_mode ne "none") {
     my @linker_order_inputs;
     for my $lib (@{$sources{library}}) {
 	my $lib_basename = TupScripts::base_name($lib);
-	my($lib_dirname) = TupScripts::absolute_name(TupScripts::directory_name($lib));
+	my($lib_dirname) = TupScripts::canonical_name(TupScripts::absolute_name(TupScripts::directory_name($lib)));
 	my($lib_name) = $lib_basename =~ /^lib(.*)\.(so|a)$/;
 
 	push @linker_order_inputs, $lib unless $lib =~ /^\//; # absolute names are not managed by Tup

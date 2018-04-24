@@ -21,6 +21,23 @@ sub help {
   }
 };
 
+# Remove "..", ".", and empty components from a name
+sub canonical_name {
+    my(@parts) = split /\/+/, $_[0];
+    my(@ret);
+    for my $part (@parts) {
+	if ($part eq ".." && @ret) {
+	    pop @ret;
+	} elsif ($part eq ".") {
+	    # nothing
+	} else {
+	    push @ret, $part;
+	}
+    }
+    @ret = (".") unless @ret;
+    return join "/", @ret;
+}
+
 # Given a file name, return the directory part. Examples:
 #    /foo/bar  => /foo
 #    /foo/bar/ => /foo/bar
