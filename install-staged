@@ -26,6 +26,16 @@ usage() {
     echo
     echo "SWITCHES"
     echo
+    echo "  --debug | --verbose | -v"
+    echo "      Print information about what's being done."
+    echo
+    echo "  --force | -f"
+    echo "      Force re-installation even for files that appear to already be installed."
+    echo
+    echo "  --libtool LIBTOOL"
+    echo "      When installing libraries and executables, do so using the specified"
+    echo "      libtool script."
+    echo
     echo "  --remove PATH | -d PATH"
     echo "      Paths to remove from rpaths. These are usually directories in the build"
     echo "      tree."
@@ -38,6 +48,8 @@ die() {
 
 remove_paths=()
 verbose=
+libtool=
+force=
 while [ "$#" -gt 0 ]; do
     case "$1" in
 	--)
@@ -48,9 +60,22 @@ while [ "$#" -gt 0 ]; do
 	    verbose=yes
 	    shift
 	    ;;
+	--force|-f)
+	    force=yes
+	    shift
+	    ;;
 	--help|-h)
 	    usage
 	    exit 0
+	    ;;
+	--libtool)
+	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
+	    libtool="$2"
+	    shift 2
+	    ;;
+	--libtool=*)
+	    libtool="${1#--libtool=}"
+	    shift
 	    ;;
 	--remove|-d)
 	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
@@ -189,8 +214,8 @@ for manifest in $(find install-staging -name MANIFEST); do
 	# dstfile is the path of the destination file
 	dstfile="$destdir/$filetgt";
 
-	# copy the file, but only if the destination doesn't exist or is older than the source.
-	if [ ! -e "$dstfile" -o "$srcfile" -nt "$dstfile" ]; then
+	# copy the file, but only if the destination doesn't exist or is older than the source, or "--force" was specified
+	if [ -n "$force" -o ! -e "$dstfile" -o "$srcfile" -nt "$dstfile" ]; then
 	    echo "INSTALL $dstfile"
 
 	    case "$(basename $dstfile)" in
@@ -205,8 +230,8 @@ for manifest in $(find install-staging -name MANIFEST); do
 		    fi
 		    ;;
 
-		*.so|*.h|*.a)
-		    # Copy these files as-is
+		*.h|*.hpp|*.H)
+		    # Copy file as-is
 		    cp --dereference -p "$srcfile" "$dstfile"
 		    ;;
 
@@ -214,54 +239,58 @@ for manifest in $(find install-staging -name MANIFEST); do
 		    # If the file is a dynamically linked ELF executable we may need to change
 		    # the rpath location for librose.so. We don't want to change the copy that's in our build
 		    # tree, so we copy it first.
-		    cp --dereference -p "$srcfile" "$dstfile"
-		    if file "$dstfile" |grep ': ELF' >/dev/null 2>&1; then
-			old_rpath_string=$(current_rpath "$dstfile")
-			old_rpath=($(echo "$old_rpath_string" |tr : ' '))
+		    if [ -n "$libtool" ]; then
+			$libtool --mode=install --quiet install "$srcfile" "$dstfile"
+		    else
+			cp --dereference -p "$srcfile" "$dstfile"
+			if file "$dstfile" |grep ': ELF' >/dev/null 2>&1; then
+			    old_rpath_string=$(current_rpath "$dstfile")
+			    old_rpath=($(echo "$old_rpath_string" |tr : ' '))
 
-			new_rpath=()
-			inserted=
-			for old_dir in "${old_rpath[@]}"; do
- 			    new_dir="$old_dir"
-			    if $(echo "$old_dir" | egrep '^(X{96}|Y{96}|Z{96})$' >/dev/null); then
-				# Remove padding paths
-				new_dir=
-			    elif [ "${#remove_paths[*]}" -eq 0 ]; then
-				# If the user didn't specify any paths to remove, remove those that have the build directory
-				# as a prefix or which don't start with a slash.
-				if [ "${old_dir#$build_dir}" != "$old_dir" ]; then
+			    new_rpath=()
+			    inserted=
+			    for old_dir in "${old_rpath[@]}"; do
+				new_dir="$old_dir"
+				if $(echo "$old_dir" | egrep '^(X{96}|Y{96}|Z{96})$' >/dev/null); then
+				    # Remove padding paths
 				    new_dir=
-				elif [ "${old_dir#/}" = "$old_dir" ]; then
-				    new_dir=
-				fi
-			    else
-				# Remove the paths that the user wants to have removed
-				for user in "${remove_paths[@]}"; do
-				    if [ "$old_dir" = "$user" ]; then
+				elif [ "${#remove_paths[*]}" -eq 0 ]; then
+				    # If the user didn't specify any paths to remove, remove those that have the build directory
+				    # as a prefix or which don't start with a slash.
+				    if [ "${old_dir#$build_dir}" != "$old_dir" ]; then
 					new_dir=
-					break
+				    elif [ "${old_dir#/}" = "$old_dir" ]; then
+					new_dir=
 				    fi
-				done
-			    fi
-
-			    if [ "$new_dir" != "" ]; then
-				if [ "$new_dir" = "$old_dir" ]; then
-				    [ -n "$verbose" ] && echo "  $old_dir -> NO_CHANGE" >&2
 				else
-				    [ -n "$verbose" ] && echo "  $old_dir -> $new_dir" >&2
+				    # Remove the paths that the user wants to have removed
+				    for user in "${remove_paths[@]}"; do
+					if [ "$old_dir" = "$user" ]; then
+					    new_dir=
+					    break
+					fi
+				    done
 				fi
-				new_rpath=("${new_rpath[@]}" "$new_dir")
-			    elif [ "$inserted" = "" ]; then
-				[ -n "$verbose" ] && echo "  $old_dir -> INSTALLATION_PREFIX" >&2
-				new_rpath=("${new_rpath[@]}" "${new_paths[@]}")
-				inserted=yes
-			    else
-				[ -n "$verbose" ] && echo "  $old_dir -> DELETED" >&2
-			    fi
-			done
 
-			new_rpath_string="$(echo "${new_rpath[@]}" |tr ' ' :)"
-			replace_rpath "$dstfile" "$new_rpath_string"
+				if [ "$new_dir" != "" ]; then
+				    if [ "$new_dir" = "$old_dir" ]; then
+					[ -n "$verbose" ] && echo "  $old_dir -> NO_CHANGE" >&2
+				    else
+					[ -n "$verbose" ] && echo "  $old_dir -> $new_dir" >&2
+				    fi
+				    new_rpath=("${new_rpath[@]}" "$new_dir")
+				elif [ "$inserted" = "" ]; then
+				    [ -n "$verbose" ] && echo "  $old_dir -> INSTALLATION_PREFIX" >&2
+				    new_rpath=("${new_rpath[@]}" "${new_paths[@]}")
+				    inserted=yes
+				else
+				    [ -n "$verbose" ] && echo "  $old_dir -> DELETED" >&2
+				fi
+			    done
+
+			    new_rpath_string="$(echo "${new_rpath[@]}" |tr ' ' :)"
+			    replace_rpath "$dstfile" "$new_rpath_string"
+			fi
 		    fi
 		    ;;
 	    esac
