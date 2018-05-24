@@ -101,6 +101,7 @@ sub language {
     return $dflt || "d"       	if $file =~ /\.d$/;
     return $dflt || "header"  	if $file =~ /\.(h|hh|H|hpp|hxx)$/;
     return "library" 	        if $file =~ /\.(so|a|dll)$/;
+    return "library"            if $file =~ /^(.*\/)?lib[^.\/][^\/]*$/;
     return $dflt || "shell"   	if $file =~ /\.sh$/;
     return "object"  	        if $file =~ /\.o$/;
     return "executable"         if $file =~ /\.exe$/;

@@ -73,6 +73,30 @@ file but you want it to be processed by Qt's "moc" tool to generate files named 
 override the default language ("header") by saying "--language=moc".  Some files whose extensions are obvious are not affected
 by this switch.
 
+=item --linkage=(shared|static|both)
+
+Determines how the output object is linked.
+
+=over
+
+=item C<shared>
+
+When creating a library, create a shared object for dynamic linking. When creating an executable, create an executable
+that links to shared libraries.
+
+=item C<static>
+
+When creating a library, create a non-shared library (e.g., Unix object archive, lib*.a). When creating an executable,
+use static linking so the executable contains the library's contents.
+
+=item C<both>
+
+When creating a library, create both shared and static versions. When creating an executable, create two versions: an
+executable that uses dynamic linking, and another one that uses static linking. The statically linked executable is
+given a different name, perhaps by appending ".static".
+
+=back
+
 =item --link=(exe|lib)
 
 Determines what kind of linking should take place. The following values are recognized:
@@ -81,15 +105,11 @@ Determines what kind of linking should take place. The following values are reco
 
 =item C<exe>
 
-The value "exe" means that an executable is produced.
+Produce an executable.  The executable is statically and/or dynamically linked according to the --link flag.
 
-=item C<archive>
+=item C<lib>
 
-The value "archive" means an archive (*.a) file is created. These are also known as static libraries.
-
-=item C<shared>
-
-The value "shared" means a shared object, or dynamically linked library is created.
+Produce a library. This produces a shared and/or static library depending on the --link flag.
 
 =item C<none>
 
@@ -196,11 +216,12 @@ found in typical Makefiles except they're prefixed with the --phase name (separa
 
 =item Compiler commands
 
-Compiler commands have the form "$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o %o -c %f" where substrings "CXX" are replaced by the
-upper-case name of the compiler ("CXX" for the C++ compiler, "C" for the C compiler, etc.). However, the variable representing
-the name of the compiler executable is an exception to the rule: $(CXX) is the C++ compiler, and the others are the language
-name followed by the letter "C". The "CPPFLAGS" variable appears only for C and C++ compilers and holds command-line switches
-for the C preprocessor. All of these variables are prefixed by the phase name and an underscore if a phase name was provided.
+Compiler commands have the form "$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o %o -c %f" where substrings "CXX" are replaced
+by the upper-case name of the compiler ("CXX" for the C++ compiler, "C" for the C compiler, etc.). However, the variable
+representing the name of the compiler executable is an exception to the rule: $(CXX) is the C++ compiler, and the others
+are the language name followed by the letter "C". The "CPPFLAGS" variable appears only for C and C++ compilers and holds
+command-line switches for the C preprocessor. All of these variables are prefixed by the phase name and an underscore if
+a phase name was provided.
 
 =back
 
@@ -212,184 +233,198 @@ use lib "$FindBin::Bin";
 use TupScripts;
 
 my($arg0) = $0 =~ m(([^/]+)$);
-my $phase;   	            # prefix for all tup variables, including the trailing "_"
-my $output;        	    # name of output file
-my $link_mode;     	    # what kind of linking to perform
-my $group;         	    # optional output group
-my @compiler_args; 	    # arguments to pass to the compiler
-my @linker_args;   	    # arguments to pass to the linker
-my @inputs;        	    # names of the input files
-my @order_inputs;  	    # additional order-only inputs
+my $phase;                  # prefix for all tup variables, including the trailing "_"
+my($output, $output2);      # name of output file ($output2 is when we generate both shared and static)
+my $link;                   # whether to produce a library ('lib') or executable ('exe'), or neither ('none')
+my $linkage = "both";       # whether to perform static linking ('static'), dynamic linking ('shared') or both ('both')
+my $group;                  # optional output group
+my @compiler_args;          # arguments to pass to the compiler
+my @linker_args;            # arguments to pass to the linker
+my @inputs;                 # names of the input files
+my @order_inputs;           # additional order-only inputs
 my $args_are_order_inputs;  # set by --begin-deps, cleared by --end-deps
 my $install_dir = "none";   # directory in which to install, or empty to choose automatically
 my $objects_bin;            # name of Tup bin for object files, excluding curly braces.
-my $language;		    # override default languages
+my $language;               # override default languages
 my $emit_macros;            # emit macros instead of commands
 my @extra_outputs;          # extra outputs for link commands
+my $ncompiled = 0;	    # number of sources compiled
 
+########################################################################################################################
 sub parse_command_line {
     while (@_) {
-	my $arg = shift @_;
+        my $arg = shift @_;
 
-	# --help
-	if ($arg =~ /^(-h|--help|-\?)$/) {
-	    TupScripts::help;
-	    exit 0;
-	}
+        # --help
+        if ($arg =~ /^(-h|--help|-\?)$/) {
+            TupScripts::help;
+            exit 0;
+        }
 
-	# --begin-deps | --end-deps
-	if ($arg eq "--begin-deps") {
-	    die "$arg0: invalid \"$arg\" after previous \"$arg\" with no intervening \"--end-deps\"\n" if $args_are_order_inputs;
-	    $args_are_order_inputs = 1;
-	    next;
-	}
-	if ($arg eq "--end-deps") {
-	    die "$arg0: invalid \"$arg\" with no previous \"--begin-deps\"\n" unless $args_are_order_inputs;
-	    $args_are_order_inputs = 0;
-	    next;
-	}
+        # --begin-deps | --end-deps
+        if ($arg eq "--begin-deps") {
+            die "$arg0: invalid \"$arg\" after previous \"$arg\" with no intervening \"--end-deps\"\n" if $args_are_order_inputs;
+            $args_are_order_inputs = 1;
+            next;
+        }
+        if ($arg eq "--end-deps") {
+            die "$arg0: invalid \"$arg\" with no previous \"--begin-deps\"\n" unless $args_are_order_inputs;
+            $args_are_order_inputs = 0;
+            next;
+        }
 
-	# --extra-output NAME | -x NAME
-	if ($arg eq '--extra-output' || $arg eq '-x') {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    push @extra_outputs, shift @_;
-	    next;
-	}
-	if ($arg =~ /^(--extra-output=|-d)(.*)/) {
-	    push @extra_outputs, $2;
-	    next;
-	}
+        # --extra-output NAME | -x NAME
+        if ($arg eq '--extra-output' || $arg eq '-x') {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            push @extra_outputs, shift @_;
+            next;
+        }
+        if ($arg =~ /^(--extra-output=|-d)(.*)/) {
+            push @extra_outputs, $2;
+            next;
+        }
 
-	# --group=NAME
-	if ($arg eq "--group") {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    $group = shift @_;
-	    next;
-	}
-	if ($arg =~ /^--group=(.*)/) {
-	    $group = $1;
-	    next;
-	}
+        # --group=NAME
+        if ($arg eq "--group") {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $group = shift @_;
+            next;
+        }
+        if ($arg =~ /^--group=(.*)/) {
+            $group = $1;
+            next;
+        }
 
-	# --depend=NAME
-	if ($arg eq '--depend') {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    push @order_inputs, shift @_;
-	    next;
-	}
-	if ($arg =~ /^--depend=(.*)/) {
-	    push @order_inputs, $1;
-	    next;
-	}
+        # --depend=NAME
+        if ($arg eq '--depend') {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            push @order_inputs, shift @_;
+            next;
+        }
+        if ($arg =~ /^--depend=(.*)/) {
+            push @order_inputs, $1;
+            next;
+        }
 
-	# --install
-	if ($arg eq '--install') {
-	    $install_dir = "";  # choose directory later
-	    next;
-	}
-	if ($arg =~ /^--install=(.*)/) {
-	    $install_dir = $1;
-	    next;
-	}
+        # --install
+        if ($arg eq '--install') {
+            $install_dir = "";  # choose directory later
+            next;
+        }
+        if ($arg =~ /^--install=(.*)/) {
+            $install_dir = $1;
+            next;
+        }
 
-	# --language=LANG
-	if ($arg eq '--language') {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    $language = shift @_;
-	    next;
-	}
-	if ($arg =~ /^--language=(.*)/) {
-	    $language = $1;
-	    next;
-	}
+        # --language=LANG
+        if ($arg eq '--language') {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $language = shift @_;
+            next;
+        }
+        if ($arg =~ /^--language=(.*)/) {
+            $language = $1;
+            next;
+        }
 
-	# --link=MODE
-	if ($arg eq '--link') {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    $link_mode = shift @_;
-	    next;
-	}
-	if ($arg =~ /^--link=(.*)/) {
-	    $link_mode = $1;
-	    next;
-	}
+        # --link=(exe|lib|none)
+        if ($arg eq '--link') {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $link = shift @_;
+            next;
+        }
+        if ($arg =~ /^--link=(.*)/) {
+            $link = $1;
+            next;
+        }
 
-	# --macro
-	if ($arg eq '--macro') {
-	    $emit_macros = 1;
-	    next;
-	}
-	if ($arg eq '--no-macro') {
-	    $emit_macros = 0;
-	    next;
-	}
-	       
-	# -o NAME | --output=NAME
-	if ($arg =~ /^(-o|--output)$/) {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    $output = shift @_;
-	    next;
-	}
-	if ($arg =~ /^(-o|--output=)(.*)/) {
-	    $output = $2;
-	    next;
-	}
+        # --linkage=(shared|static|both)
+        if ($arg eq '--linkage') {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $linkage = shift @_;
+            next;
+        }
+        if ($arg =~ /^--linkage=(.*)/) {
+            $linkage = $1;
+            next;
+        }
 
-	# --objects=BIN
-	if ($arg eq "--objects") {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    $objects_bin = shift @_;
-	    next;
-	}
-	if ($arg =~ /^--objects=(.*)/) {
-	    $objects_bin = $1;
-	    next;
-	}
+        # --macro
+        if ($arg eq '--macro') {
+            $emit_macros = 1;
+            next;
+        }
+        if ($arg eq '--no-macro') {
+            $emit_macros = 0;
+            next;
+        }
+               
+        # -o NAME | --output=NAME
+        if ($arg =~ /^(-o|--output)$/) {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $output = shift @_;
+            next;
+        }
+        if ($arg =~ /^(-o|--output=)(.*)/) {
+            $output = $2;
+            next;
+        }
 
-	# --phase=NAME
-	if ($arg eq "--phase") {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    $phase = shift @_;
-	    next;
-	}
-	if ($arg =~ /^--phase=(.*)/) {
-	    $phase = $1;
-	    next;
-	}
+        # --objects=BIN
+        if ($arg eq "--objects") {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $objects_bin = shift @_;
+            next;
+        }
+        if ($arg =~ /^--objects=(.*)/) {
+            $objects_bin = $1;
+            next;
+        }
 
-	# Switches passed to the compiler
-	if ($arg =~ /^-[DIU]$/) {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    push @compiler_args, $arg, shift @_;
-	    next;
-	}
-	if ($arg =~ /^-[DIU](.*)/) {
-	    push @compiler_args, $arg;
-	    next;
-	}
+        # --phase=NAME
+        if ($arg eq "--phase") {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            $phase = shift @_;
+            next;
+        }
+        if ($arg =~ /^--phase=(.*)/) {
+            $phase = $1;
+            next;
+        }
 
-	# Switches passed to the linker
-	if ($arg =~ /^-[Ll]$/) {
-	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
-	    push @linker_args, $arg, shift @_;
-	    next;
-	}
-	if ($arg =~ /^-[Ll](.*)/) {
-	    push @linker_args, $arg;
-	    next;
-	}
+        # Switches passed to the compiler
+        if ($arg =~ /^-[DIU]$/) {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            push @compiler_args, $arg, shift @_;
+            next;
+        }
+        if ($arg =~ /^-[DIU](.*)/) {
+            push @compiler_args, $arg;
+            next;
+        }
 
-	# Unknown
-	if ($arg =~ /^-/) {
-	    die "$arg0: unknown switch: $arg\n";
-	}
+        # Switches passed to the linker
+        if ($arg =~ /^-[Ll]$/) {
+            die "$arg0: \"$arg\" expects an argument\n" unless @_;
+            push @linker_args, $arg, shift @_;
+            next;
+        }
+        if ($arg =~ /^-[Ll](.*)/) {
+            push @linker_args, $arg;
+            next;
+        }
 
-	# Input file
-	if ($args_are_order_inputs) {
-	    push @order_inputs, $arg;
-	} else {
-	    push @inputs, $arg;
-	}
+        # Unknown
+        if ($arg =~ /^-/) {
+            die "$arg0: unknown switch: $arg\n";
+        }
+
+        # Input file
+        if ($args_are_order_inputs) {
+            push @order_inputs, $arg;
+        } else {
+            push @inputs, $arg;
+        }
     }
 
     die "$arg0: missing \"--end-deps\" switch\n" if $args_are_order_inputs;
@@ -398,8 +433,11 @@ sub parse_command_line {
     $phase .= "_" unless $phase eq "";
     die "$arg0: --group and --install are mutually exclusive\n" if $group && $install_dir ne "none";
     die "$arg0: object bin \"$objects_bin\" (from --objects) is malformed\n" unless $objects_bin =~ /^\w*$/;
+    die "$arg0: invalid --link \"$link\"\n" unless $link =~ /^(exe|lib|none|)$/;
+    die "$arg0: invalid --linkage \"$linkage\"\n" unless $linkage =~ /^(static|shared|both)$/;
 }
 
+########################################################################################################################
 # Given a list of languages (c, cxx) return the language that should be used for linking.
 sub linker_language {
     return "d" if grep {$_ eq "d"} @_;
@@ -407,6 +445,7 @@ sub linker_language {
     return $language || "c";
 }
 
+########################################################################################################################
 # Fix the a group specification by adding angle brackets around the last component of the path.
 sub make_group_name {
     my($input) = @_;
@@ -417,198 +456,215 @@ sub make_group_name {
 }
 
 ########################################################################################################################
-
-parse_command_line @ARGV;
-$group = make_group_name $group;
-
-# If any header files are specified in the inputs, move them to the order-only inputs instead because headers are not
-# normally compiled directly.
-if ($language ne "moc") {
-    push @order_inputs, grep {TupScripts::language("", $_) eq "header"} @inputs;
-    @inputs =           grep {TupScripts::language("", $_) ne "header"} @inputs;
-}
-
-# If no link mode was specified, try to guess based on output name and/or input names.
-if ($link_mode eq "") {
-    if ($output =~ /\.a$/) {
-	$link_mode = "archive";
-    } elsif ($output =~ /\.so$/) {
-	$link_mode = "shared";
-    } elsif ($language eq "moc" || grep {TupScripts::is_qt_ui($_) || TupScripts::is_qt_resource($_)} @inputs) {
-	$link_mode = "none";
-    } else {
-	$link_mode = "exe";
+# Choose the $link and $linkage based on output file name.
+sub choose_linking {
+    if ($link eq "") {
+        if ($output =~ /\.a$/) {
+            $link = "lib";
+            if ($linkage eq "") {
+                $linkage = "static";
+            } elsif ($linkage ne "static") {
+                die "$arg0: invalid linkage \"$linkage\" for output \"$output\"\n";
+            }
+        } elsif ($output =~ /\.so$/) {
+            $link = "lib";
+            if ($linkage eq "") {
+                $linkage = "shared";
+            } elsif ($linkage ne "shared") {
+                die "$arg0: invalid linkage \"$linkage\" for output \"$output\"\n";
+            }
+        } elsif ($language eq "moc" || grep {TupScripts::is_qt_ui($_) || TupScripts::is_qt_resource($_)} @inputs) {
+            $link = "none";
+        } elsif ($output =~ /^lib[^.]/) {
+            $link = "lib";
+        } else {
+            $link = "exe";
+        }
     }
 }
 
-# Check that the link mode is consistent with the output and input names. Also choose an output name if none was given.
-if ($link_mode eq "exe") {
-    for my $input (@inputs) {
-	if (!TupScripts::is_source_code($input) && !TupScripts::is_library($input) && !TupScripts::is_object($input)) {
-	    die "$arg0: input for generating an executable is not source code, object, or library: $input\n";
-	}
-    }
-    if ($output eq "") {
-	my @non_libs = grep {!TupScripts::is_library($_)} @inputs;
-	my $best_input = @non_libs ? $non_libs[0] : $inputs[0];
-	$output = TupScripts::make_variable($best_input);
-    }
-    $install_dir = "bin" if $install_dir eq "auto";
+########################################################################################################################
+# Check that the $link mode is suitable for the input and output names, and choose output names and installation
+# directories if none were specified.
+sub choose_output_names {
+    if ($link eq "exe") {
+        for my $input (@inputs) {
+            if (!TupScripts::is_source_code($input) && !TupScripts::is_library($input) && !TupScripts::is_object($input)) {
+                die "$arg0: input for generating an executable is not source code, object, or library: $input\n";
+            }
+        }
+        if ($output eq "") {
+            my @non_libs = grep {!TupScripts::is_library($_)} @inputs;
+            my $best_input = @non_libs ? $non_libs[0] : $inputs[0];
+            $output = TupScripts::make_variable($best_input);
+        }
 
-} elsif ($link_mode eq "archive") {
-    for my $input (@inputs) {
-	if (!TupScripts::is_source_code($input) && !TupScripts::is_object($input)) {
-	    die "$arg0: input for generating an archive (static library) is not source code or object: $input\n";
-	}
-    }
-    if ($output eq "") {
-	$output = "lib" . TupScripts::make_variable($inputs[0]) . ".a";
+        if ($linkage eq "both") {
+            $output2 = $output . ".static";
+        }
+
+        $install_dir = "bin" if $install_dir eq "auto";
+
+    } elsif ($link eq "lib") {
+        for my $input (@inputs) {
+            if (!TupScripts::is_source_code($input) && !TupScripts::is_object($input)) {
+                die "$arg0: input for generating a library is not source code or object: $input\n";
+            }
+        }
+
+        $output = TupScripts::make_variable($inputs[0]) unless $output;
+        $output = $1 if $output =~ /^lib([^.].*)/; # remove leading "lib" for now, added later
+        $output = $1 if $output =~ /^(.+)\.(a|.so)$/;   # remove trailing ".a" or ".so" now, added later
+
+        if ($linkage eq "shared") {
+            $output = "lib" . $output . ".so";
+        } elsif ($linkage eq "static") {
+            $output = "lib" . $output . ".a";
+        } else {
+            ($output, $output2) = ("lib" . $output . ".so", "lib" . $output . ".a");
+        }
+
+        $install_dir = "lib" if $install_dir eq "auto";
+
+    } elsif ($link eq "none") {
+        my($generatingObjects, $generatingSource);
+        for my $input (@inputs) {
+            if (TupScripts::is_source_code($input)) {
+                # okay, we're compiling source code to generate object files
+                $generatingObjects = 1;
+            } elsif (TupScripts::is_qt_ui($input)) {
+                # okay, we're running Qt's "uic" tool to generate more *.h files
+                $generatingSource = 1;
+            } elsif (TupScripts::is_qt_resource($input)) {
+                # okay, we're running Qt's "rcc" tool to generate more *.C files
+                $generatingSource = 1;
+            } else {
+                die "$arg0: unrecognized compiler input file: $input\n";
+            }
+        }
+        if ($generatingObjects && $output) {
+            die "$arg0: --output is prohibited when generating object files\n";
+        } elsif ($generatingSource && $output) {
+            die "$arg0: --output is prohibited when generating source files\n";
+        }
+
+        if ($output eq "") {
+            $output = TupScripts::make_variable($inputs[0]); # but we still need $output for various other things
+        }
+        if ($linkage eq "both") {
+            $output2 = $output . ".static";
+        }
+
     } else {
-	$output .= ".a"	unless $output =~ /\.a$/;
-	$output = "lib" . $output unless $output =~ /^lib/;
+        die "$arg0: invalid --link mode: $link\n";
     }
-    $install_dir = "lib" if $install_dir eq "auto";
-
-} elsif ($link_mode eq "shared") {
-    for my $input (@inputs) {
-	if (!TupScripts::is_source_code($input) && !TupScripts::is_object($input)) {
-	    die "$arg0: input for generating a shared object (dynamic library) is not source code or object: $input\n";
-	}
-    }
-    if ($output eq "") {
-	$output = "lib" . TupScripts::make_variable($inputs[0]) . ".so";
-    } else {
-	$output .= ".so" unless $output =~ /\.so$/;
-	$output = "lib" . $output unless $output =~ /^lib/;
-    }
-    $install_dir = "lib" if $install_dir eq "auto";
-
-} elsif ($link_mode eq "none") {
-    my($generatingObjects, $generatingSource);
-    for my $input (@inputs) {
-	if (TupScripts::is_source_code($input)) {
-	    # okay, we're compiling source code to generate object files
-	    $generatingObjects = 1;
-	} elsif (TupScripts::is_qt_ui($input)) {
-	    # okay, we're running Qt's "uic" tool to generate more *.h files
-	    $generatingSource = 1;
-	} elsif (TupScripts::is_qt_resource($input)) {
-	    # okay, we're running Qt's "rcc" tool to generate more *.C files
-	    $generatingSource = 1;
-	} else {
-	    die "$arg0: unrecognized compiler input file: $input\n";
-	}
-    }
-    if ($generatingObjects && $output) {
-	die "$arg0: --output is prohibited when generating object files\n";
-    } elsif ($generatingSource && $output) {
-	die "$arg0: --output is prohibited when generating source files\n";
-    }
-    $output = TupScripts::make_variable($inputs[0]); # but we still need $output for various other things
-} else {
-    die "$arg0: invalid --link mode: $link_mode\n";
 }
 
-my($var) = TupScripts::make_variable($output);
-$objects_bin = "${var}_OBJECTS" unless $objects_bin;
+########################################################################################################################
+# Generate the compile rules.
+sub generate_compile_rules {
+    my ($sources) = @_;
+    die unless ref($sources) eq 'HASH';
 
-# Split the inputs into arrays based on their type.
-my %sources = TupScripts::by_language($language, @inputs);
+    for my $lang (keys %{$sources}) {
+        next unless @{$sources->{$lang}};
+        my $compile_macro = "${phase}compile_${lang}";       # name of macro if we're emitting macros
+        my @rule_outputs;                                    # output names for the rule like %B.o, etc.
+        my $uc_lang = uc($lang);                             # upper-case language name like CXX, C, D, etc. overridden below
+        my $uc_compiler = TupScripts::compiler_exe($lang);   # upper-case compiler name like CXX, CC, etc.
+        my @extra_compiler_args;                             # switches, flags, etc. appearing at end of command
 
-# Generate the compile rules
-my $ncompiled = 0;
-for my $lang (keys %sources) {
-    next unless @{$sources{$lang}};
-    my $compile_macro = "${phase}compile_${lang}";       # name of macro if we're emitting macros
-    my @rule_outputs;                                    # output names for the rule like %B.o, etc.
-    my $uc_lang = uc($lang);                             # upper-case language name like CXX, C, D, etc. overridden below
-    my $uc_compiler = TupScripts::compiler_exe($lang);   # upper-case compiler name like CXX, CC, etc.
-    my @extra_compiler_args;                             # switches, flags, etc. appearing at end of command
+        if ($lang eq "c++" || $lang eq "c") {
+            $uc_lang = "CXX" if $uc_lang eq "C++";
+            $compile_macro = "${phase}compile_" . lc($uc_compiler);
+            push @rule_outputs, "${output}-%B.o";
+            push @extra_compiler_args, '-o', '%o', '-c', '%f';
+        } elsif ($lang eq 'd') {
+            push @rule_outputs, TupScripts::make_variable($output) . '-%B.o';
+            push @extra_compiler_args, '-of=%o', '-c', '%f';
+        } elsif ($lang eq "moc") {
+            push @rule_outputs, "moc_%B.cpp";
+            push @extra_compiler_args, '-o', '%o', '%f';
+        } elsif (TupScripts::is_source_code($sources->{$lang}[0])) {
+            push @rule_outputs, "${output}-%B.o";
+            push @extra_compiler_args, '-o', '%o', '%f';
+        } elsif (TupScripts::is_qt_ui($sources->{$lang}[0])) {
+            $uc_lang = "UIC";
+            push @rule_outputs, "ui_%B.h";
+            push @extra_compiler_args, '-o', '%o', '%f';
+        } elsif (TupScripts::is_qt_resource($sources->{$lang}[0])) {
+            $uc_lang = "RCC";
+            push @rule_outputs, "qrc_%B.C";
+            push @extra_compiler_args, '-o', '%o', '%f';
+        } else {
+            next; # not something to be compiled
+        }
 
-    if ($lang eq "c++" || $lang eq "c") {
-	$uc_lang = "CXX" if $uc_lang eq "C++";
-	$compile_macro = "${phase}compile_" . lc($uc_compiler);
-	push @rule_outputs, "${output}-%B.o";
-	push @extra_compiler_args, '-o', '%o', '-c', '%f';
-    } elsif ($lang eq 'd') {
-	push @rule_outputs, TupScripts::make_variable($output) . '-%B.o';
-	push @extra_compiler_args, '-of=%o', '-c', '%f';
-    } elsif ($lang eq "moc") {
-	push @rule_outputs, "moc_%B.cpp";
-	push @extra_compiler_args, '-o', '%o', '%f';
-    } elsif (TupScripts::is_source_code($sources{$lang}[0])) {
-	push @rule_outputs, "${output}-%B.o";
-	push @extra_compiler_args, '-o', '%o', '%f';
-    } elsif (TupScripts::is_qt_ui($sources{$lang}[0])) {
-	$uc_lang = "UIC";
-	push @rule_outputs, "ui_%B.h";
-	push @extra_compiler_args, '-o', '%o', '%f';
-    } elsif (TupScripts::is_qt_resource($sources{$lang}[0])) {
-	$uc_lang = "RCC";
-	push @rule_outputs, "qrc_%B.C";
-	push @extra_compiler_args, '-o', '%o', '%f';
-    } else {
-	next; # not something to be compiled
+        # Inputs
+        print ": foreach ", join(" ", @{$sources->{$lang}});
+        print " | ", join(" ", TupScripts::fix_bins(@order_inputs)) if @order_inputs;
+
+        # Macro or command
+        print " |>";
+        if ($emit_macros) {
+            print " !${compile_macro}";
+            print " ", TupScripts::shell_escape($_) for @compiler_args;
+        } else {
+            print " ^c ${phase}${uc_compiler} \%f^";
+            print " \$(${phase}${uc_compiler})";
+            print " \$(${phase}CPPFLAGS)" if $lang eq "c++" || $lang eq "c";
+            print " \$(${phase}${uc_lang}FLAGS)";
+            print " ", TupScripts::shell_escape($_) for @compiler_args;
+            print " ", join(" ", @extra_compiler_args) if @extra_compiler_args;
+        }
+
+        # Outputs
+        print " |> ", join(" ", @rule_outputs);
+        print " ${group}" if $group && $link eq "none";
+        print " {${objects_bin}}\n";
+
+        $ncompiled += @{$sources->{$lang}};
     }
-
-    # Inputs
-    print ": foreach ", join(" ", @{$sources{$lang}});
-    print " | ", join(" ", TupScripts::fix_bins(@order_inputs)) if @order_inputs;
-
-    # Macro or command
-    print " |>";
-    if ($emit_macros) {
-	print " !${compile_macro}";
-	print " ", TupScripts::shell_escape($_) for @compiler_args;
-    } else {
-	print " ^c ${phase}${uc_compiler} \%f^";
-	print " \$(${phase}${uc_compiler})";
-	print " \$(${phase}CPPFLAGS)" if $lang eq "c++" || $lang eq "c";
-	print " \$(${phase}${uc_lang}FLAGS)";
-	print " ", TupScripts::shell_escape($_) for @compiler_args;
-	print " ", join(" ", @extra_compiler_args) if @extra_compiler_args;
-    }
-
-    # Outputs
-    print " |> ", join(" ", @rule_outputs);
-    print " ${group}" if $group && $link_mode eq "none";
-    print " {${objects_bin}}\n";
-
-    $ncompiled += @{$sources{$lang}};
 }
 
-# Generate the link rule
-if ($link_mode ne "none") {
-    my $lang = linker_language(keys %sources);
+########################################################################################################################
+sub generate_link_rules {
+    my($linkage, $output, $sources) = @_;
+    die unless ref($sources) eq 'HASH';
+
+    my $lang = linker_language(keys %{$sources});
 
     # Get the list of linker inputs
     my @linker_inputs;
     push @linker_inputs, "{${objects_bin}}" if $ncompiled > 0;
-    push @linker_inputs, TupScripts::fix_groups_bins(@{$sources{object}});
+    push @linker_inputs, TupScripts::fix_groups_bins(@{$sources->{object}});
 
     # Get the various parts of the eventual macro or command
     my $link_macro;
     my @compiler_args;
-    if ($link_mode eq "exe") {
-	$link_macro = "${phase}linkexe_" . linker_language(keys %sources);
+    if ($link eq "exe") {
+	$link_macro = "${phase}linkexe_" . linker_language(keys %{$sources});
 	if ($lang eq 'd') {
 	    push @compiler_args, '-of=%o', TupScripts::tup_input_variable(@linker_inputs);
 	} else {
 	    push @compiler_args, '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
 	}
-    } elsif ($link_mode eq "archive") {
-	$link_macro = "${phase}link_static";
-    } elsif ($link_mode eq "shared") {
-	$link_macro = "${phase}linklib_" . linker_language(keys %sources);
-	if ($lang eq 'cxx' || $lang eq 'c') {
-	    push @compiler_args, '-shared', '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
-	} elsif ($lang eq 'd') {
-	    push @compiler_args, '-lib', '-of=%o', TupScripts::tup_input_variable(@linker_inputs);
+    } elsif ($link eq "lib") {
+	if ($linkage eq "static") {
+            $link_macro = "${phase}link_static";
 	} else {
-	    push @compiler_args, '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
+	    die unless $linkage eq "shared";
+            $link_macro = "${phase}linklib_" . linker_language(keys %{$sources});
+            if ($lang eq 'cxx' || $lang eq 'c') {
+                push @compiler_args, '-shared', '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
+            } elsif ($lang eq 'd') {
+                push @compiler_args, '-lib', '-of=%o', TupScripts::tup_input_variable(@linker_inputs);
+            } else {
+                push @compiler_args, '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
+            }
 	}
     } else {
-	die "$arg0: internal logic error\n";
+	die "$arg0: internal logic error (link=$link)\n";
     }
 
     # Library names specified as files, like "../../libfoo.so" need to be passed to the linker as "-L../.. -lfoo" in order
@@ -616,11 +672,20 @@ if ($link_mode ne "none") {
     # order-only dependencies so that Tup knows about them. Furthermore, the directory names should be absolute so that
     # the resulting executable can be invoked from any working directory.
     my @linker_order_inputs;
-    for my $lib (@{$sources{library}}) {
-	my $lib_basename = TupScripts::base_name($lib);
-	my($lib_dirname) = TupScripts::canonical_name(TupScripts::absolute_name(TupScripts::directory_name($lib)));
-	my($lib_name) = $lib_basename =~ /^lib(.*)\.(so|a)$/;
+    for my $l (@{$sources->{library}}) {
+	# Normalize the library name by making sure it ends with the proper file extension for the $linkage mode
+	my($lib) = $l;
+	$lib = $1 if $lib =~ /^((.*\/)?lib[^.].*)(\.(a|so))?$/;
+	$lib .= ".a" if $linkage eq "static";
+	$lib .= ".so" if $linkage eq "shared";
 
+	# Get a library base name like "foo" if the input is "/some/libdir/libfoo.so"
+	my $lib_basename = TupScripts::base_name($lib);
+	my $lib_name = $lib_basename;
+	$lib_name = $1 if $lib_name =~ /^lib([^.].*)/;
+	$lib_name = $1 if $lib_name =~ /^(.+)\.(a|so)$/;
+
+	my($lib_dirname) = TupScripts::canonical_name(TupScripts::absolute_name(TupScripts::directory_name($lib)));
 	push @linker_order_inputs, $lib unless $lib =~ /^\//; # absolute names are not managed by Tup
 	if ($lang eq 'cxx' || $lang eq 'c') {
 	    unshift @linker_args, "-L$lib_dirname", "-Wl,-rpath,$lib_dirname", "-l$lib_name";
@@ -640,7 +705,7 @@ if ($link_mode ne "none") {
     if ($emit_macros) {
 	print " !${link_macro}";
 	print " ", join(" ", @linker_args) if @linker_args;
-    } elsif ($link_mode eq "archive") {
+    } elsif ($link eq "lib" && $linkage eq "static") {
 	print " ^c ${phase}LINK \%o^ ar rcs %o %f";
     } else {
 	my $uc_lang = uc($lang);
@@ -649,7 +714,7 @@ if ($link_mode ne "none") {
 	print " \$(${phase}${uc_compiler}) \$(${phase}${uc_lang}FLAGS)";
 	print " ", join(" ", @compiler_args) if @compiler_args;
 	print " ", join(" ", @linker_args) if @linker_args;
-	print " \$(${phase}LDFLAGS)";
+	print ' $(' . $phase . "LDFLAGS_" . uc($linkage) . ")";
     }
 
     # Output
@@ -658,4 +723,35 @@ if ($link_mode ne "none") {
     print " ${group}" if $group;
     print " \$(ROOT)/\$(INSTALL_STAGING)/$install_dir/<staging>" if $install_dir ne "none";
     print "\n";
+}
+
+########################################################################################################################
+
+parse_command_line @ARGV;
+$group = make_group_name $group;
+
+# If any header files are specified in the inputs, move them to the order-only inputs instead because headers are not
+# normally compiled directly.
+if ($language ne "moc") {
+    push @order_inputs, grep {TupScripts::language("", $_) eq "header"} @inputs;
+    @inputs =           grep {TupScripts::language("", $_) ne "header"} @inputs;
+}
+
+choose_linking;
+choose_output_names;
+
+my($var) = TupScripts::make_variable($output);
+$objects_bin = "${var}_OBJECTS" unless $objects_bin;
+
+# Split the inputs into arrays based on their type.
+my %sources = TupScripts::by_language($language, @inputs);
+
+generate_compile_rules(\%sources);
+if ($link ne "none") {
+    if ($linkage eq "shared" || $linkage eq "static") {
+	generate_link_rules($linkage, $output, \%sources);
+    } else {
+	generate_link_rules("shared", $output,  \%sources);
+	generate_link_rules("static", $output2, \%sources);
+    }
 }
