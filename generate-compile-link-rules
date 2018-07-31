@@ -433,7 +433,7 @@ sub parse_command_line {
     $phase .= "_" unless $phase eq "";
     die "$arg0: --group and --install are mutually exclusive\n" if $group && $install_dir ne "none";
     die "$arg0: object bin \"$objects_bin\" (from --objects) is malformed\n" unless $objects_bin =~ /^\w*$/;
-    die "$arg0: invalid --link \"$link\"\n" unless $link =~ /^(exe|lib|none|)$/;
+    die "$arg0: invalid --link \"$link\"\n" unless $link =~ /^(exe|lib|python|none|)$/;
     die "$arg0: invalid --linkage \"$linkage\"\n" unless $linkage =~ /^(static|shared|both)$/;
 }
 
@@ -507,14 +507,14 @@ sub choose_output_names {
 
     } elsif ($link eq "lib") {
         for my $input (@inputs) {
-            if (!TupScripts::is_source_code($input) && !TupScripts::is_object($input)) {
-                die "$arg0: input for generating a library is not source code or object: $input\n";
+            if (!TupScripts::is_source_code($input) && !TupScripts::is_object($input) && !TupScripts::is_library($input)) {
+                die "$arg0: input for generating a library is not source code, object, or library: $input\n";
             }
         }
 
         $output = TupScripts::make_variable($inputs[0]) unless $output;
         $output = $1 if $output =~ /^lib([^.].*)/; # remove leading "lib" for now, added later
-        $output = $1 if $output =~ /^(.+)\.(a|.so)$/;   # remove trailing ".a" or ".so" now, added later
+        $output = $1 if $output =~ /^(.+)\.(a|so)$/;   # remove trailing ".a" or ".so" now, added later
 
         if ($linkage eq "shared") {
             $output = "lib" . $output . ".so";
@@ -522,6 +522,27 @@ sub choose_output_names {
             $output = "lib" . $output . ".a";
         } else {
             ($output, $output2) = ("lib" . $output . ".so", "lib" . $output . ".a");
+        }
+
+        $install_dir = "lib" if $install_dir eq "auto";
+
+    } elsif ($link eq 'python') {
+        for my $input (@inputs) {
+            if (!TupScripts::is_source_code($input) && !TupScripts::is_object($input) && !TupScripts::is_library($input)) {
+                die "$arg0: input for generating a library is not source code, object, or library: $input\n";
+            }
+        }
+
+        $output = TupScripts::make_variable($inputs[0]) unless $output;
+        $output = $1 if $output =~ /^lib([^.].*)/; # remove leading "lib"
+        $output = $1 if $output =~ /^(.+)\.so$/;   # remove trailing ".so" now, added later
+
+        if ($linkage eq "shared") {
+            $output = $output . ".so";
+        } elsif ($linkage eq "static") {
+	    die "$arg0: python API cannot be generated as a static library\n";
+        } else {
+	    die "$arg0: python API cannot be generated as a static library\n";
         }
 
         $install_dir = "lib" if $install_dir eq "auto";
@@ -649,7 +670,7 @@ sub generate_link_rules {
 	} else {
 	    push @compiler_args, '-o', '%o', TupScripts::tup_input_variable(@linker_inputs);
 	}
-    } elsif ($link eq "lib") {
+    } elsif ($link eq "lib" || $link eq "python") {
 	if ($linkage eq "static") {
             $link_macro = "${phase}link_static";
 	} else {
@@ -675,7 +696,7 @@ sub generate_link_rules {
     for my $l (@{$sources->{library}}) {
 	# Normalize the library name by making sure it ends with the proper file extension for the $linkage mode
 	my($lib) = $l;
-	$lib = $1 if $lib =~ /^((.*\/)?lib[^.].*)(\.(a|so))?$/;
+	$lib = $1 if $lib =~ /^((.*\/)?lib[^.].*?)(\.(a|so))?$/;
 	$lib .= ".a" if $linkage eq "static";
 	$lib .= ".so" if $linkage eq "shared";
 
@@ -685,7 +706,8 @@ sub generate_link_rules {
 	$lib_name = $1 if $lib_name =~ /^lib([^.].*)/;
 	$lib_name = $1 if $lib_name =~ /^(.+)\.(a|so)$/;
 
-	my($lib_dirname) = TupScripts::canonical_name(TupScripts::absolute_name(TupScripts::directory_name($lib)));
+	#my($lib_dirname) = TupScripts::canonical_name(TupScripts::absolute_name(TupScripts::directory_name($lib)));
+	my($lib_dirname) = TupScripts::directory_name($lib);
 	push @linker_order_inputs, $lib unless $lib =~ /^\//; # absolute names are not managed by Tup
 	if ($lang eq 'cxx' || $lang eq 'c') {
 	    unshift @linker_args, "-L$lib_dirname", "-Wl,-rpath,$lib_dirname", "-l$lib_name";
