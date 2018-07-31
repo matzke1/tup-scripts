@@ -39,6 +39,9 @@ usage() {
     echo "  --remove PATH | -d PATH"
     echo "      Paths to remove from rpaths. These are usually directories in the build"
     echo "      tree."
+    echo
+    echo "  --add PATH | -a PATH"
+    echo "      Paths to add to all rpaths."
 }
 
 die() {
@@ -47,6 +50,7 @@ die() {
 }
 
 remove_paths=()
+add_paths=()
 verbose=
 libtool=
 force=
@@ -55,6 +59,11 @@ while [ "$#" -gt 0 ]; do
 	--)
 	    shift
 	    break
+	    ;;
+	--add|-a)
+	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
+	    add_paths=("${add_paths[@]}" "$2")
+	    shift 2
 	    ;;
 	--debug|--verbose|-v)
 	    verbose=yes
@@ -247,7 +256,7 @@ for manifest in $(find install-staging -name MANIFEST); do
 			    old_rpath_string=$(current_rpath "$dstfile")
 			    old_rpath=($(echo "$old_rpath_string" |tr : ' '))
 
-			    new_rpath=()
+			    new_rpath=("${add_paths[@]}")
 			    inserted=
 			    for old_dir in "${old_rpath[@]}"; do
 				new_dir="$old_dir"
