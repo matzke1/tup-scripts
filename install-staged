@@ -9,7 +9,7 @@ usage() {
     echo
     echo "SYNOPSIS"
     echo
-    echo "  $arg0 [SWITCHES] PREFIX"
+    echo "  $arg0 [SWITCHES] PREFIX [SYMLINK]"
     echo
     echo "DESCRIPTION"
     echo
@@ -108,10 +108,22 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 
-[ "$#" -eq 1 ] || die "invalid usage"
+# Main installation directory
+[ "$#" -lt 1 ] && die "invalid usage: no installation directory specified"
 mkdir -p "$1"
 prefix=$(realpath "$1")
 [ -d install-staging ] || die "no ./install-staging directory"
+shift
+
+# Additional symbolic link to main installation directory?
+symlink=
+if [ "$#" -ge 1 ]; then
+    symlink="$1"
+    shift
+fi
+
+[ "$#" -eq 0 ] || die "invalid usage: wrong number of positional arguments (try --help)"
+
 new_paths=("$prefix/lib")
 
 # The program we can use to change the rpath that's embedded in a
@@ -306,3 +318,8 @@ for manifest in $(find install-staging -name MANIFEST); do
 	fi
     done
 done
+
+if [ -n "$symlink" ]; then
+    rm -f "$symlink"
+    ln -s "$prefix" "$symlink"
+fi
