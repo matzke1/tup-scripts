@@ -26,6 +26,9 @@ usage() {
     echo
     echo "SWITCHES"
     echo
+    echo "  --add PATH | -a PATH"
+    echo "      Paths to add to all rpaths."
+    echo
     echo "  --debug | --verbose | -v"
     echo "      Print information about what's being done."
     echo
@@ -36,12 +39,18 @@ usage() {
     echo "      When installing libraries and executables, do so using the specified"
     echo "      libtool script."
     echo
+    echo "  --next"
+    echo "      The PREFIX is only the root of the installation hierarchy instead of"
+    echo "      the actual installation point.  When this switch is used, the installation"
+    echo "      directory name is computed by combining the given PREFIX, the current"
+    echo "      date, the release mode ('release' or 'debug'), and a three-digit serial"
+    echo "      number. Also, if a SYMLINK isn't specified, it is constructed in the "
+    echo "      given PREFIX directory and named \"latest\".  If PREFIX itself is not "
+    echo "      specified, it defaults to \"\$HOME/rose-installed\"."
+    echo
     echo "  --remove PATH | -d PATH"
     echo "      Paths to remove from rpaths. These are usually directories in the build"
     echo "      tree."
-    echo
-    echo "  --add PATH | -a PATH"
-    echo "      Paths to add to all rpaths."
 }
 
 die() {
@@ -49,11 +58,68 @@ die() {
     exit 1
 }
 
+# Read a variable from tup_config
+get_tup_config() {
+    local tup_config="$1"; shift
+    local retval=
+    for varname in "$@"; do
+	local s=$(sed -n "/^${varname}=/ s/^${varname}=//p" "$tup_config")
+	if [ -n "$s" ]; then
+	    if [ -n "$retval" ]; then
+		retval="$retval $s"
+	    else
+		retval="$s"
+	    fi
+	fi
+    done
+    echo "$retval"
+}
+
+# Return true (0) if the tup.config file appears to be configuring a debug build.
+is_debug_build() {
+    local tup_config="$1"
+    local switches=$(get_tup_config "$tup_config" \
+				    CONFIG_CPPFLAGS \
+				    CONFIG_C_CXX_DEBUG CONFIG_C_DEBUG CONFIG_CXX_DEBUG \
+				    CONFIG_C_CXX_OPTIM CONFIG_C_OPTIM CONFIG_CXX_OPTIM \
+				    CONFIG_C_CXX_WARN CONFIG_C_WARN CONFIG_CXX_WARN \
+				    CONFIG_C_CXX_MISC CONFIG_C_MISC CONFIG_CXX_MISC \
+				    CONFIG_SUPPORT_CPPFLAGS CONFIG_SUPPORT_CFLAGS CONFIG_SUPPORT_CXXFLAGS \
+				    CONFIG_LIBROSE_CPPFLAGS CONFIG_LIBROSE_CFLAGS CONFIG_LIBROSE_CXXFLAGS \
+				    CONFIG_TOOL_CPPFLAGS CONFIG_TOOL_CFLAGS CONFIG_TOOL_CXXFLAGS)
+    local is_debug=yes has_g=
+    for switch in $(echo "$switches" |sed 's/[ \t]\+/\n/g'); do
+	case "$switch" in
+	    -g)          has_g=yes ;;
+	    -Os|-O0|-O1) is_debug=yes ;;
+	    -O*)         is_debug= ;;
+	esac
+    done
+
+    [ -n "$is_debug" -a -n "$has_g" ] && return 0  # this is a debug build
+    return 1 # not a debug build
+}
+
+# Get the next three-digit serial number by looking at all the files in the specified directory and scanning the
+# last integer in their names (e.g., "12 in "matzke1.attempt12"), if any, and returning one greater than the maximum.
+# If there are no files with integers in their names, return "001".
+next_serial_number() {
+    local dir="$1"
+    if [ -d "$dir" ]; then
+	(cd $dir && ls |perl -ne '/^.*?(\d+)[^0-9]*$/ and $x = $1 > $x ? $1 : $x; END { printf "%03d\n", $x+1 }')
+    else
+	echo 1
+    fi
+}
+
+####################################################################################################################################
+
 remove_paths=()
 add_paths=()
 verbose=
 libtool=
 force=
+auto_next=
 while [ "$#" -gt 0 ]; do
     case "$1" in
 	--)
@@ -86,6 +152,10 @@ while [ "$#" -gt 0 ]; do
 	    libtool="${1#--libtool=}"
 	    shift
 	    ;;
+	--next)
+	    auto_next=yes
+	    shift
+	    ;;
 	--remove|-d)
 	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
 	    remove_paths=("${remove_paths[@]}" "$2")
@@ -109,20 +179,40 @@ while [ "$#" -gt 0 ]; do
 done
 
 # Main installation directory
-[ "$#" -lt 1 ] && die "invalid usage: no installation directory specified"
-mkdir -p "$1"
-prefix=$(realpath "$1")
-[ -d install-staging ] || die "no ./install-staging directory"
-shift
+if [ "$#" -gt 1 ]; then
+    prefix=$(realpath "$1")
+    shift
+elif [ -n "$auto_next" ]; then
+    prefix="$HOME/rose-installed"
+else
+    die "invalid usage: no installation directory specified"
+fi
 
 # Additional symbolic link to main installation directory?
 symlink=
 if [ "$#" -ge 1 ]; then
     symlink="$1"
     shift
+elif [ -n "$auto_next" ]; then
+    symlink="$prefix/latest"
 fi
 
 [ "$#" -eq 0 ] || die "invalid usage: wrong number of positional arguments (try --help)"
+
+# If this is an auto-next build, then $prefix is only the root of the hiearchy and we need to
+# fill in the details.
+if [ -n "$auto_next" ]; then
+    prefix="$prefix/$(date '+%Y-%m-%d')"
+
+    build_type=release
+    [ -r tup.config ] || die "$arg0: no tup.config file; was this a tup build?"
+    is_debug_build tup.config && build_type=debug
+
+    prefix="${prefix}/${build_type}-$(next_serial_number "$prefix")"
+fi
+
+[ -d install-staging ] || die "no ./install-staging directory; was this a tup build?"
+mkdir -p "$prefix"
 
 new_paths=("$prefix/lib")
 
