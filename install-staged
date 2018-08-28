@@ -179,7 +179,7 @@ while [ "$#" -gt 0 ]; do
 done
 
 # Main installation directory
-if [ "$#" -gt 1 ]; then
+if [ "$#" -ge 1 ]; then
     prefix=$(realpath "$1")
     shift
 elif [ -n "$auto_next" ]; then
