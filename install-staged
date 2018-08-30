@@ -108,7 +108,7 @@ next_serial_number() {
     if [ -d "$dir" ]; then
 	(cd $dir && ls |perl -ne '/^.*?(\d+)[^0-9]*$/ and $x = $1 > $x ? $1 : $x; END { printf "%03d\n", $x+1 }')
     else
-	echo 1
+	echo "001"
     fi
 }
 
