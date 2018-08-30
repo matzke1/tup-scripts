@@ -74,6 +74,17 @@ sub absolute_name {
     return "$root/$name";
 }
 
+# Given the relative name of the root of the build tree, e.g., tup's $(TUP_CWD) variabe, return the
+# name of the current working directory relative to the root of the build tree.
+sub cwd_build_relative {
+    my ($tup_cwd) = @_;
+    my @cwd = split /\//, Cwd::cwd();
+    my @upward = grep {$_ ne "" && $_ ne "."} split /\//, $tup_cwd;
+    die "$arg0: build_relative_cwd: invalid \$(tup_cwd) or equivalent: \"$tup_cwd\"\n" if grep {$_ ne ".."} @upward;
+    my @cwdrel = @cwd[scalar(@cwd)-scalar(@upward) .. scalar(@cwd)-1];
+    return @cwdrel ? join("/", @cwdrel) : ".";
+}
+
 # Escape a string for the shell
 sub shell_escape {
     local($_) = @_;
