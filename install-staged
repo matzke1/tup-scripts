@@ -415,4 +415,4 @@ done
 for symlink in "${symlinks[@]}"; do
     rm -f "$symlink"
     ln -s "$prefix" "$symlink"
-fi
+done
