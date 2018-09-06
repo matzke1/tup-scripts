@@ -9,7 +9,7 @@ usage() {
     echo
     echo "SYNOPSIS"
     echo
-    echo "  $arg0 [SWITCHES] PREFIX [SYMLINK]"
+    echo "  $arg0 [SWITCHES] PREFIX [SYMLINKS...]"
     echo
     echo "DESCRIPTION"
     echo
@@ -189,12 +189,15 @@ else
 fi
 
 # Additional symbolic link to main installation directory?
-symlink=
+symlinks=()
 if [ "$#" -ge 1 ]; then
-    symlink="$1"
+    symlinks=("$@")
     shift
 elif [ -n "$auto_next" ]; then
-    symlink="$prefix/latest"
+    build_type=release
+    [ -r tup.config ] || die "$arg0: no tup.config file; was this a tup build?"
+    is_debug_build tup.config && build_type=debug
+    symlinks=("$prefix/latest" "$prefix/latest-$build_type")
 fi
 
 [ "$#" -eq 0 ] || die "invalid usage: wrong number of positional arguments (try --help)"
@@ -409,7 +412,7 @@ for manifest in $(find install-staging -name MANIFEST); do
     done
 done
 
-if [ -n "$symlink" ]; then
+for symlink in "${symlinks[@]}"; do
     rm -f "$symlink"
     ln -s "$prefix" "$symlink"
-fi
+done
