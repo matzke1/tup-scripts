@@ -2,6 +2,7 @@
 # This is a test script for running a test from a Tupfile
 set -e
 arg0="${0##*/}"
+dir0="${0%/*}"
 
 # Defaults
 timeout=15m
@@ -9,6 +10,8 @@ output_file=
 answer_file=
 disabled=
 filter=cat
+map_srcroot=
+map_bldroot=
 
 ########################################################################################################################
 usage() {
@@ -32,6 +35,14 @@ usage() {
     echo "        given (--answer) then also run the filter on the answer file before"
     echo "        comparing with the output. The filter should read standard input and"
     echo "        write to standard output. The default is \"$filter\"."
+    echo
+    echo "    --map=SRCROOT,BLDROOT"
+    echo "        Indicates that tup is mapping the source tree root onto the build tree."
+    echo "        Using this switch will result in more accurate file names for tools that"
+    echo "        run outside the tup build environment. The SRCROOT should be the absolute"
+    echo "        name of the top of the source tree, and BLDROOT is the value of the tup"
+    echo "        \$(TUP_CWD) directory, i.e., a relative name upward from the current working"
+    echo "        directory to the root of the build tree."
     echo
     echo "    -o OUTPUT | --output=OUTPUT"
     echo "        The result of running COMMAND... is stored in the specified file. If"
@@ -116,6 +127,17 @@ while [ "$#" -gt 0 ]; do
 	    usage
 	    exit 0
 	    ;;
+	--map)
+	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
+	    map_srcdir=$(echo "$2" |cut -d, -f1)
+	    map_blddir=$(echo "$2" |cut -d, -f2 -s)
+	    shift 2
+	    ;;
+	--map=*)
+	    map_srcdir=$(echo "${1#--map=}" |cut -d, -f1)
+	    map_blddir=$(echo "${1#--map=}" |cut -d, -f2 -s)
+	    shift
+	    ;;
 	-o|--output)
 	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
 	    output_file="$2"
@@ -147,6 +169,15 @@ while [ "$#" -gt 0 ]; do
     esac
 done
 [ -n "$output_file" ] || die "no output name specified (see --output)"
+
+# If --map was specified, figure out the relative name of the CWD w.r.t. the root
+# of the build tree.
+if [ -n "$map_srcdir" ]; then
+    map_srcdir=$(cd "$map_srcdir" && pwd)
+    map_blddir=$(cd "$map_blddir" && pwd)
+    map_cwdrel=$(pwd)
+    map_cwdrel="${map_cwdrel#$map_blddir/}"
+fi
 
 # Check for being disabled.
 if [ -n "$disabled" ]; then
@@ -194,15 +225,29 @@ fi
 
 # Add some extra usage info to the end of the file if there was an error
 if [ -n "$error" ]; then
+    if [ -n "$map_srcdir" ]; then
+	validate_answer="$map_srcdir/scripts/tup/validate-answer"
+    else
+	validate_answer="$dir0/validate-answer"
+    fi
+    answer_abs="${map_srcdir}/${map_cwdrel}/${answer_file}"
+
     # Something we can easily grep (e.g., "grep TEST_FAILED *.result")
     echo "TEST_FAILED $output_file" >>"$output_file"
+    if [ -n "$map_srcdir" ]; then
+	echo "REVALIDATE $validate_answer --filter=\"$filter\" --answer=$answer_abs $output_file" >>"$output_file"
+    fi
 
     # If a comparison test failed, how can an expert review the differences and possibly accept them?
     if [ -n "$answer_file" ]; then
 	(
 	    echo
 	    echo "To review and possibly accept the new output as an answer, run:"
-	    echo "   validate-answer --filter=\"$filter\" --answer=\"$answer_file\" $output_file"
+	    if [ -n "$map_srcdir" ]; then
+		echo "  $validate_answer --filter=\"$filter\" --answer=$answer_abs $output_file"
+	    else
+		echo "  $validate_answer --filter=\"$filter\" --answer=$answer_file $output_file"
+	    fi
 	) >>"$output_file"
     fi
 fi    
