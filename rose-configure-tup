@@ -127,7 +127,7 @@ language_vars() {
 		languages=($(sed -n '/^[ \t]*ALL_SUPPORTED_LANGUAGES/ { s/.*"\(.*\)"/\1/; s/[, \t]\+/ /g; p; q}' \
 				 < "$RG_SRC/config/support-languages.m4"))
 		;;
-	    c)
+	    c|c++)
 		languages=("${languages[@]}" "cxx")
 		;;
 	    binaries)
@@ -143,6 +143,25 @@ language_vars() {
 	echo -n "ENABLE_${lang}_ANALYSIS" |tr a-z A-Z
 	echo "=yes"
     done
+}
+
+# Information about the hosting (frontend) compiler
+host_compiler_vars() {
+    if [ -n "$CXX_VENDOR" ]; then
+	echo "CXX_VENDOR=\"$CXX_VENDOR\""
+	echo "CXX_VERSION=\"$CXX_VERSION\""
+	echo "CXX_LANGUAGE=\"$CXX_LANGUAGE\""
+    fi
+}
+
+# Information about the target (backend) compiler
+target_compiler_vars() {
+    local vendor="$(makefile_value BACKEND_COMPILER_VERSION_NAME Makefile)"
+    local major="$(makefile_value BACKEND_COMPILER_VERSION_MAJOR_NUMBER Makefile)"
+    local minor="$(makefile_value BACKEND_COMPILER_VERSION_MINOR_NUMBER Makefile)"
+    local patch="$(makefile_value BACKEND_COMPILER_VERSION_PATCHLEVEL_NUMBER Makefile)"
+    echo "CXX_TARGET_VENDOR=\"$vendor\""
+    echo "CXX_TARGET_VERSION=\"${major}.${minor}.${patch}\""
 }
 
 # Given the name of a "lib", "include", or "bin" directory, return the part before.
@@ -245,7 +264,7 @@ dry_run $RG_SRC/scripts/tup/merge-configs \
     WITH_MAGIC="$(value_or_no "$(config_switch --with-magic "$@")")" \
     WITH_PNG="$(value_or_no "$LIBPNG_ROOT")" \
     WITH_PQXX="$(value_or_no "$(config_switch --with-pqxx "$@")")" \
-    WITH_PYTHON="$(value_or_no "$(makefile_value PYTHON_ROOT Makefile)")" \
+    WITH_PYTHON="$(value_ite "$(makefile_value PYTHON Makefile)" "$(makefile_value PYTHON_ROOT Makefile)" no)" \
     PYTHON_VERSION="$(makefile_value PYTHON_VERSION_MM Makefile)" \
     WITH_QT="$(value_or_no "$(exe_prefix "$(makefile_value MOC Makefile)")")" \
     WITH_READLINE="$(value_or_no "$(makefile_value LIBREADLINE_INSTALL_PATH Makefile)")" \
@@ -256,6 +275,8 @@ dry_run $RG_SRC/scripts/tup/merge-configs \
     WITH_Z3="$(value_or_no "$(makefile_value ROSE_Z3_PREFIX Makefile)")" \
     WITH_ZLIB="$(value_or_no "$ZLIB_ROOT")" \
     AUTOTOOLS_STASH="$(pwd)/.stash" \
+    $(host_compiler_vars) \
+    $(target_compiler_vars) \
     ROSE_SOURCE="$RG_SRC" \
     ROSE_VERSION="$(makefile_value PACKAGE_VERSION Makefile)" \
     < "${RG_SRC}/tup.config" > ./tup.config

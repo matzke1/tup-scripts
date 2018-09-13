@@ -8,7 +8,8 @@ dir0="${0%/*}"
 timeout=15m
 output_file=
 answer_file=
-disabled=
+disabled_mesg=
+disabled_cond=0
 filter=cat
 map_srcroot=
 map_bldroot=
@@ -25,10 +26,15 @@ usage() {
     echo "        compared. If there are differences, they are shown (with \"diff -u\")"
     echo "        and the command is deemed to have failed."
     echo
-    echo "    --disabled=REASON"
+    echo "    --disabled=REASON | --enabled"
     echo "        Marks this test as being disabled. As far as the build system is"
     echo "        concerned, the test passes. However, it prints the disablement message"
     echo "        to the tty in red text."
+    echo
+    echo "    --disabled-if CONDITION REASON"
+    echo "        Marks this test as being disable if the condition (a perl expression)"
+    echo "        evaluates to true. The \"--disabled=REASON\" switch is the same as "
+    echo "        saying \"--disabled-if 1 REASON\""
     echo
     echo "    -f FILTER | --filter=FILTER"
     echo "        Run the specified filter command on standard output. If an answer is"
@@ -103,11 +109,24 @@ while [ "$#" -gt 0 ]; do
 	    ;;
 	--disabled)
 	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
-	    disabled="$2"
+	    disabled_mesg="$2"
+	    disabled_cond=1
 	    shift 2
 	    ;;
 	--disabled=*)
-	    disabled="${1#--disabled=}"
+	    disabled_mesg="${1#--disabled=}"
+	    disabled_cond=1
+	    shift
+	    ;;
+	--disabled-if)
+	    [ "$#" -gt 2 ] || die "\"$1\" switch expects two arguments"
+	    disabled_cond="$2"
+	    disabled_mesg="$3"
+	    shift 3
+	    ;;
+	--enabled)
+	    disabled_mesg=
+	    disabled_cond=0
 	    shift
 	    ;;
 	-f|--filter)
@@ -180,11 +199,12 @@ if [ -n "$map_srcdir" ]; then
 fi
 
 # Check for being disabled.
-if [ -n "$disabled" ]; then
-    echo -ne '\033[31;1m'
-    echo -n "This test is disabled ($disabled)"
+if perl -I"$dir0" -Mversions -e "exit !($disabled_cond)"; then
+    [ -n "$disabled_mesg" ] || disabled_mesg="unspecified reason"
+    echo -ne '\033[31;1m\t'
+    echo -n "This test is disabled ($disabled_mesg)"
     echo -e '\033[0m'
-    echo "This test is disabled ($disabled)" >"$output_file"
+    echo "This test is disabled ($disabled_mesg)" >"$output_file"
     exit 0
 fi
 
