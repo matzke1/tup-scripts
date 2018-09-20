@@ -323,7 +323,7 @@ for manifest in $(find install-staging -name MANIFEST); do
 	# filetgt is the base name of the destination file. We need to remove
 	# any ".preinstall" extensions that might be present.
 	filetgt="${srcfile##*/}"
-	filetgt="${filetgt%.preinstall}"
+	filetgt="${filetgt%.preinstall*}"
 
 	# dstfile is the path of the destination file
 	dstfile="$destdir/$filetgt";

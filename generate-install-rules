@@ -209,6 +209,8 @@ for my $dir (keys %dir_lang_files) {
 	}
 
 	# Outputs
-	print " |> %b.preinstall \$(ROOT)/install-staging/$dir/<staging>\n";
+	my($output_dirstring) = $dir;
+	$output_dirstring =~ s/\//-/g;
+	print " |> %b.preinstall-${output_dirstring} \$(ROOT)/install-staging/$dir/<staging>\n";
     }
 }
