@@ -319,6 +319,8 @@ else
 	echo "+ : update_stash" >&2
     else
 	for file in $(find . -type f -newer $config_timestamp); do
+	    dir="${file%/*}"
+	    [ -n "$dir" ] || dir="."
 	    save=
 	    if [ ! -e ".stash/$file" ]; then
 		save=yes # not existing in the stash
@@ -327,9 +329,11 @@ else
 	    fi
 	    if [ -n "$save" ]; then
 		# Save the new file
+		dry_run mkdir -p ".stash/$dir"
 		dry_run cp -p "$file" ".stash/$file"
 	    else
 		# Restore the old (identical) file including its mtime
+		dry_run mkdir -p "$dir"
 		dry_run cp -p ".stash/$file" "$file"
 	    fi
 	done
