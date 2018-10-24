@@ -55,6 +55,10 @@ usage() {
     echo "  --remove PATH | -d PATH"
     echo "      Paths to remove from rpaths. These are usually directories in the build"
     echo "      tree."
+    echo
+    echo "  --exclude PATTERN"
+    echo "      Do not adjust the rpaths for files matching the specified pattern. The "
+    echo "      pattern is a shell glob."
 }
 
 die() {
@@ -125,6 +129,7 @@ libtool=
 force=
 auto_next=
 rpath_changer=
+exclude=()
 while [ "$#" -gt 0 ]; do
     case "$1" in
 	--)
@@ -148,6 +153,15 @@ while [ "$#" -gt 0 ]; do
 	--debug|--verbose|-v)
 	    verbose=yes
 	    shift
+	    ;;
+	--exclude=*)
+	    exclude=("${exclude[@]}" "${1#--exclude=}")
+	    shift
+	    ;;
+	--exclude)
+	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
+	    exclude=("${exclude[@]}" "$2")
+	    shift 2
 	    ;;
 	--force|-f)
 	    force=yes
@@ -313,6 +327,18 @@ replace_rpath() {
     esac
 }
 
+# Return true if the specified source file should be excluded from rpath substitution
+exclude_rpath() {
+    local file="$1"; shift
+    local pattern=
+    for pattern in "$@"; do
+	if [ "${file%$pattern}" != "$file" ]; then
+	    return 0 # pattern matches end of file name
+	fi
+    done
+    return 1
+}
+
 if [ -n "$verbose" ]; then
     for dir in "${new_paths[@]}"; do
 	echo "new_path = $dir"
@@ -377,7 +403,9 @@ for manifest in $(find install-staging -name MANIFEST); do
 		    # If the file is a dynamically linked ELF executable we may need to change
 		    # the rpath location for librose.so. We don't want to change the copy that's in our build
 		    # tree, so we copy it first.
-		    if [ -n "$libtool" ]; then
+		    if exclude_rpath "$srcfile" "${exclude[@]}"; then
+			cp --dereference -p "$srcfile" "$dstfile"
+		    elif [ -n "$libtool" ]; then
 			$libtool --mode=install --quiet install "$srcfile" "$dstfile"
 		    else
 			cp --dereference -p "$srcfile" "$dstfile"
