@@ -155,7 +155,7 @@ sub by_directory_language {
     if ($language) {
 	$languages{$language} = [ @_ ];
     } else {
-	%languages = TupScripts::by_language(@_);
+	%languages = TupScripts::by_language('shell', @_);
     }
 
     my %ret;
