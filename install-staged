@@ -29,6 +29,10 @@ usage() {
     echo "  --add PATH | -a PATH"
     echo "      Paths to add to all rpaths."
     echo
+    echo "  --changer patchelf|chrpath|rpath"
+    echo "      The tool to use to change the RPATH in an ELF file.  If this switch"
+    echo "      isn't specified, then the tools are tried in the order listed here."
+    echo
     echo "  --debug | --verbose | -v"
     echo "      Print information about what's being done."
     echo
@@ -120,6 +124,7 @@ verbose=
 libtool=
 force=
 auto_next=
+rpath_changer=
 while [ "$#" -gt 0 ]; do
     case "$1" in
 	--)
@@ -129,6 +134,15 @@ while [ "$#" -gt 0 ]; do
 	--add|-a)
 	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
 	    add_paths=("${add_paths[@]}" "$2")
+	    shift 2
+	    ;;
+	--changer=*)
+	    rpath_changer="${1#--changer=}"
+	    shift
+	    ;;
+	--changer)
+	    [ "$#" -ge 2 ] || die "\"$1\" expects an argument"
+	    rpath_changer="$2"
 	    shift 2
 	    ;;
 	--debug|--verbose|-v)
@@ -229,7 +243,11 @@ if [ "$rpath_changer" = "" ]; then
 	rpath_changer=patchelf
     elif chrpath --version >/dev/null 2>&1; then
 	rpath_changer=chrpath
+    elif rpath --version >/dev/null 2>&1; then
+	rpath_changer=rpath
     fi
+elif [ "$rpath_changer" != patchelf -a "$rpath_changer" != chrpath -a "$rpath_changer" != rpath ]; then
+    die "invalid rpath changer: $rpath_changer"
 fi
 
 # Returns the current rpath for the given shared ELF executable.
@@ -242,6 +260,9 @@ current_rpath() {
 	    ;;
 	chrpath)
 	    chrpath --list "$file" |cut -d= -f2-
+	    ;;
+	rpath)
+	    rpath "$file"
 	    ;;
 	skip)
 	    : no path
@@ -279,6 +300,9 @@ replace_rpath() {
 	chrpath)
 	    # Excessivly noisy command
 	    chrpath --replace "$rpath" "$file" >/dev/null
+	    ;;
+	rpath)
+	    rpath "$rpath" "$file"
 	    ;;
 	skip)
 	    : nothing
