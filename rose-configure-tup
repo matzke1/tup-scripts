@@ -108,9 +108,13 @@ value_or_else() {
     value_ite "$value" "$value" "$dflt"
 }
 
-# Given a VALUE return "no" or VALUE
+# Given a VALUE return "no" or VALUE.  A second argument of "no" forces the return of "no"
 value_or_no() {
-    value_or_else "$1" no
+    if [ "$2" = "no" ]; then
+	echo no
+    else
+	value_or_else "$1" no
+    fi
 }
 
 # Given ROSE configure arguments, echo the list of tup variables for enabling and disabling ROSE
@@ -266,7 +270,7 @@ dry_run $RG_SRC/scripts/tup/merge-configs \
     WITH_PQXX="$(value_or_no "$(config_switch --with-pqxx "$@")")" \
     WITH_PYTHON="$(value_ite "$(makefile_value PYTHON Makefile)" "$(makefile_value PYTHON_ROOT Makefile)" no)" \
     PYTHON_VERSION="$(makefile_value PYTHON_VERSION_MM Makefile)" \
-    WITH_QT="$(value_or_no "$(exe_prefix "$(makefile_value MOC Makefile)")")" \
+    WITH_QT="$(value_or_no "$(exe_prefix "$(makefile_value MOC Makefile)")" "$(config_switch --with-qt "$@")")" \
     WITH_READLINE="$(value_or_no "$(makefile_value LIBREADLINE_INSTALL_PATH Makefile)")" \
     WITH_TIFF="$(value_or_no "$LIBTIFF_ROOT")" \
     WITH_WT="$(value_or_no "$(makefile_value WT_PREFIX Makefile)")" \
