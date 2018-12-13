@@ -32,6 +32,13 @@ is a shared library.
 
 =over
 
+=item --compilation-database=I<GROUP>
+
+Emit rules that will generate JSON files containing information about the command that would be run to compile a file.
+The specification can be found in the LLVM "JSON Compilation Database Format Specification" document. The I<GROUP> is
+the name of the Tup group for the JSON files, which will ultimately be used to merge all such JSON files into a single
+database.
+
 =item --depend=I<INPUT> | --begin-deps I<INPUTS> --end-deps
 
 Specifies order-only inputs for this rule.  The order-only inputs are those things on which the compile commands depend
@@ -258,6 +265,7 @@ my @extra_outputs;          # extra outputs for link commands
 my $ncompiled = 0;	    # number of sources compiled
 my @mapped_dirs;	    # empty, or the arguments of --map switch (absolute source dir and relative build dir)
 my $command_flags = "";     # content of the ^-flags in tup commands
+my $emit_compilation_db;    # emit rules to generate LLVM compilation database files; value is Tup group name
 
 ########################################################################################################################
 sub parse_command_line {
@@ -281,6 +289,17 @@ sub parse_command_line {
             $args_are_order_inputs = 0;
             next;
         }
+
+	# --compilation-database GROUP
+	if ($arg eq '--compilation-database') {
+	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
+	    $emit_compilation_db = shift @_;
+	    next;
+	}
+	if ($arg =~ /^--compilation-database=(.*)/) {
+	    $emit_compilation_db = $1;
+	    next;
+	}
 
         # --extra-output NAME | -x NAME
         if ($arg eq '--extra-output' || $arg eq '-x') {
@@ -452,6 +471,17 @@ sub parse_command_line {
     die "$arg0: object bin \"$objects_bin\" (from --objects) is malformed\n" unless $objects_bin =~ /^\w*$/;
     die "$arg0: invalid --link \"$link\"\n" unless $link =~ /^(exe|lib|python|none|)$/;
     die "$arg0: invalid --linkage \"$linkage\"\n" unless $linkage =~ /^(static|shared|both)$/;
+
+    # Convert the compilation database name into a Tup group
+    if ($emit_compilation_db ne "") {
+	if ($emit_compilation_db =~ /<\w+>$/) {
+	    # already a Tup group
+	} elsif ($emit_compilation_db =~ /^(.*\/)?(\w+)$/) {
+	    $emit_compilation_db = "$1<$2>";
+	} else {
+	    die "$arg0: compilation database is not a Tup group \"$emit_compilation_db\"\n";
+	}
+    }
 }
 
 ########################################################################################################################
@@ -654,27 +684,42 @@ sub generate_compile_rules {
         }
 
         # Inputs
-        print ": foreach ", join(" ", @{$sources->{$lang}});
-        print " | ", join(" ", TupScripts::fix_bins(@order_inputs)) if @order_inputs;
+	my $inputs_str = "foreach " . join(" ", @{$sources->{$lang}});
+        $inputs_str .= " | " . join(" ", TupScripts::fix_bins(@order_inputs)) if @order_inputs;
 
         # Macro or command
-        print " |>";
+	my $flags_str;
+	my $command_str;
         if ($emit_macros) {
-            print " !${compile_macro}";
-            print " ", TupScripts::shell_escape($_) for @compiler_args;
-        } else {
-            print " ^${command_flags} ${phase}${uc_compiler} \%f^";
-            print " \$(${phase}${uc_compiler})";
-            print " \$(${phase}CPPFLAGS)" if $lang eq "c++" || $lang eq "c";
-            print " \$(${phase}${uc_lang}FLAGS)";
-            print " ", TupScripts::shell_escape($_) for @compiler_args;
-            print " ", join(" ", @extra_compiler_args) if @extra_compiler_args;
-        }
+	    $command_str = "!${compile_macro} ";
+	    $command_str .= " " . TupScripts::shell_escape($_) for @compiler_args;
+	} else {
+            $flags_str = "^${command_flags} ${phase}${uc_compiler} \%f^";
+	    $command_str .= "\$(${phase}${uc_compiler})";
+            $command_str .= " \$(${phase}CPPFLAGS)" if $lang eq "c++" || $lang eq "c";
+            $command_str .= " \$(${phase}${uc_lang}FLAGS)";
+            $command_str .= " " . TupScripts::shell_escape($_) for @compiler_args;
+            $command_str .= " " . join(" ", @extra_compiler_args) if @extra_compiler_args;
+	}
 
         # Outputs
-        print " |> ", join(" ", @rule_outputs);
-        print " ${group}" if $group && $link eq "none";
-        print " {${objects_bin}}\n";
+	my $output_files_str = join(" ", @rule_outputs);
+	my $output_group_str = ($group && $link eq "none" ? "${group}" : "");
+	my $output_bin_str = "{${objects_bin}}";
+	
+	# Emit the compilation command
+        print(": ", $inputs_str, 
+              " |> ", $flags_str, " ", $command_str,
+              " |> ", $output_files_str, " ", $output_group_str, " ", $output_bin_str, "\n");
+
+	# Compilation database
+	if ($emit_compilation_db ne "") {
+	    print(": ", $inputs_str,
+	          " |> ^${command_flags} compilation database \%f^",
+		  " \$(compilation_database_record)",
+		  " command=", TupScripts::shell_escape($command_str), " file=\%f >%o",
+		  " |> ", join(" ", map {"$_.json"} @rule_outputs), " ", $emit_compilation_db, "\n");
+	}
 
         $ncompiled += @{$sources->{$lang}};
     }
