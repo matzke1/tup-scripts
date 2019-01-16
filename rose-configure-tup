@@ -283,6 +283,7 @@ dry_run $RG_SRC/scripts/tup/merge-configs \
     $(target_compiler_vars) \
     ROSE_SOURCE="$RG_SRC" \
     ROSE_VERSION="$(makefile_value PACKAGE_VERSION Makefile)" \
+    TUP_ACKNOWLEDGMENT="$(value_or_no "$TUP_ACKNOWLEDGMENT")" \
     < "${RG_SRC}/tup.config" > ./tup.config
 
 # The ROSE_CONFIGURE_DATE is usually the time at which "configure" was run. However, that causes the
