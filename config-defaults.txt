@@ -1,0 +1,62 @@
+# Example configuration defaults                    -*- shell -*-
+#
+# Cut and paste parts of this file into your project's tup.config (the one in the source tree, not the build tree).
+
+########################################################################################################################
+# Configuration for C compilrs on Unix-like machines.
+########################################################################################################################
+
+CONFIG_CC=cc
+CONFIG_CC_O_SWITCH=-o'' ''
+CONFIG_CC_C_SWITCH=-c'' ''
+CONFIG_CC_INCDIR_SWITCH=-I
+CONFIG_CC_LIBDIR_SWITCH=-L
+CONFIG_CC_RPATH_SWITCH=-Wl,-rpath,
+CONFIG_CC_LIB_SWITCH=-l
+
+########################################################################################################################
+# Configuration for C++ compilers on Unix-like machines.
+########################################################################################################################
+
+CONFIG_CXX=c++
+CONFIG_CXX_O_SWITCH=-o'' ''
+CONFIG_CXX_C_SWITCH=-c'' ''
+CONFIG_CXX_INCDIR_SWITCH=-I
+CONFIG_CXX_LIBDIR_SWITCH=-L
+CONFIG_CXX_RPATH_SWITCH=-Wl,-rpath,
+CONFIG_CXX_LIB_SWITCH=-l
+
+########################################################################################################################
+# Configuration for Qt compilers.
+########################################################################################################################
+
+CONFIG_MOC=moc
+CONFIG_MOC_O_SWITCH=-o'' ''
+CONFIG_MOC_C_SWITCH=
+
+CONFIG_UIC=uic
+CONFIG_UIC_O_SWITCH=-o'' ''
+CONFIG_UIC_C_SWITCH=
+
+CONFIG_RCC=rcc
+CONFIG_RCC_O_SWITCH=-o'' ''
+CONFIG_RCC_C_SWITCH=
+
+########################################################################################################################
+# Configuration for GNU Fortran.
+########################################################################################################################
+
+CONFIG_FC=gfortran
+CONFIG_FC_O_SWITCH=-o'' ''
+CONFIG_FC_C_SWITCH=-c'' ''
+
+########################################################################################################################
+# Configuration for Digital Mars D compiler.
+########################################################################################################################
+
+CONFIG_DC=dmd
+CONFIG_DC_O_SWITCH=-of=
+CONFIG_DC_C_SWITCH=-c'' ''
+CONFIG_DC_INCDIR_SWITCH=
+CONFIG_DC_LIBDIR_SWITCH=
+CONFIG_DC_LIB_SWITCH=
