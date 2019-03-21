@@ -165,6 +165,10 @@ called "support", "library" and "tool".
 The phases can have any name you like, and the rules that this script generates will refer to variables and macros
 whose names begin with the phase followed by an underscore (or no prefix if no phase).
 
+=item --rpath=I<PATHS>
+
+A colon-separated list of directory names that will be set as the RPATH value when generating an executable.
+
 =item Compiler and linker switches
 
 The following switches are recognized and passed along to the compiler and/or linker. This list is intentionally short
@@ -177,89 +181,16 @@ The recognized linker switches are: -L, and -l with one argument each.
 
 =back
 
-=head1 VARIABLES
+=head1 MACROS AND VARIABLES
 
-The rules that are emitted contain a variety of variables as described in this section.
+If this script emits rules containing macros, then it relies on the definitions of those macros appearing in either
+the top-level Tuprules.tup file or in the Tupfiles themselves.
 
-The variable names below contain the following meta-variables:
+In the descriptions that follow, the I<PHASE> is the value of the --phase command-line switch. If this is empty, then
+the following underscore is also omitted from macro and variable names.  The I<LANGUAGE> is a source language, which is
+normally the lower-case string describing the language. In the case of C++, the string is "cxx".
 
-=over
-
-=item I<phase>
-
-The I<phase> is the value of the --phase command-line switch. If I<phase> is empty, then the following underscore is also
-omitted from the variable name.
-
-=item I<uclang>
-
-The I<uclang> is a source language in upper-case. In the case of C++, the string is "CXX".
-
-=item I<compiler>
-
-The compiler is an upper-case string representing the name of the language compiler, such as "CC", "CXX", "DC", "FC",
-etc. The string is usually generated from the first letters of the language and ends with "C". "CXX" is an exceptional
-case and is this way due to established conventions in Makefiles.
-
-=item I<linkage>
-
-The word "shared" or "static" depending on which linkage mode(s) are enabled.
-
-=back
-
-The variables emitted are:
-
-=over
-
-=item $(ROOT)
-
-This variable is the relative name of the top of the project's source tree relative to the directory containing this
-Tupfile.
-
-=item $(INSTALL_STAGING)
-
-This variable is the relative name of the installation staging directory with respect to the top of the build tree. It
-must exist as a descendent of the build tree.
-
-=item $(I<phase>_I<compiler>)
-
-This variable holds the initial part of the command line for invoking the compiler for a certain phase and language.
-
-=item $(I<phase>_CPPFLAGS)
-
-This variable holds the C preprocessor specific command-line switches when invoking a C or C++ compiler.
-
-=item $(I<phase>_I<uclang>FLAGS)
-
-This variable holds the command-line switches for invoking the compiler for the specified phase and language.
-
-=item $(compilation_database_record)
-
-This variable holds the name of a command that produces an LLVM compilation database record. The command is invoked with
-two arguments of the form "command='I<COMMAND>'" and "file='I<INPUT>'" and it should produce the database record on
-standard output.
-
-=item $(I<phase>_LDFLAGS_I<linkage>)
-
-This variable holds the command-line switches for the invoking a compiler in linking mode.
-
-=back
-
-=head1 MACROS
-
-If this script emits rules containing macros, then it relies on the definitions of those macros appearing in either the
-top-level Tuprules.tup file or in the Tupfiles themselves. The macro names documented below contain the following
-meta-variables in addition to those already describe in the VARIABLES section.
-
-=over 
-
-=item I<language>
-
-The I<language> is a source language, which is normally the lower-case string describing the language. In the case of
-C++, the string is "cxx".
-
-=back
-
-The following macros are emitted:
+The following macros and variables are emitted by this script:
 
 =over
 
@@ -285,6 +216,35 @@ archive or static library whose name is given by the "%o" special variable.
 This macro should invoke a linker for the specified source language and build phase. It should expect object files
 and/or archives as inputs in the "%f" special variable, and generate a shared object or dynamic library whose name is
 given by the "%o" special variable.
+
+=item variable $(ROOT)
+
+This variable is the relative name of the top of the project's source tree relative to the directory containing this
+Tupfile.
+
+=item variable $(INSTALL_STAGING)
+
+This variable is the relative name of the installation staging directory with respect to the top of the build tree. It
+must exist as a descendent of the build tree.
+
+=back
+
+=head1 COMMANDS
+
+Instead of generating rules containing macros that must be defined elsewhere, this script can also generate commands
+directly. The generated commands use variables for the various parts, and those variables are similar in name to variables
+found in typical Makefiles except they're prefixed with the --phase name (separated by an undercore).
+
+=over
+
+=item Compiler commands
+
+Compiler commands have the form "$(CXX) $(CPPFLAGS) $(CXXFLAGS) -o %o -c %f" where substrings "CXX" are replaced
+by the upper-case name of the compiler ("CXX" for the C++ compiler, "C" for the C compiler, etc.). However, the variable
+representing the name of the compiler executable is an exception to the rule: $(CXX) is the C++ compiler, and the others
+are the language name followed by the letter "C". The "CPPFLAGS" variable appears only for C and C++ compilers and holds
+command-line switches for the C preprocessor. All of these variables are prefixed by the phase name and an underscore if
+a phase name was provided.
 
 =back
 
@@ -315,6 +275,7 @@ my $ncompiled = 0;	    # number of sources compiled
 my @mapped_dirs;	    # empty, or the arguments of --map switch (absolute source dir and relative build dir)
 my $command_flags = "";     # content of the ^-flags in tup commands
 my $emit_compilation_db;    # emit rules to generate LLVM compilation database files; value is Tup group name
+my $rpath;
 
 ########################################################################################################################
 sub parse_command_line {
@@ -487,6 +448,17 @@ sub parse_command_line {
             $phase = $1;
             next;
         }
+
+	# --rpath=DIRS
+	if ($arg eq "--rpath") {
+	    die "$arg0: \"$arg\" expects an argument\n" unless @_;
+	    $rpath = shift @_;
+	    next;
+	}
+	if ($arg =~ /^--rpath=(.*)/) {
+	    $rpath = $1;
+	    next;
+	}
 
         # Switches passed to the compiler
         if ($arg =~ /^-[DIU]$/) {
@@ -865,6 +837,9 @@ sub generate_link_rules {
 	print " ", join(" ", @compiler_args) if @compiler_args;
 	print " ", join(" ", @linker_args) if @linker_args;
 	print ' $(' . $phase . "LDFLAGS_" . uc($linkage) . ")";
+	if ($rpath ne "" && $linkage eq 'shared') {
+	    print "; \$(TUP_SCRIPTS)/append-rpath '$rpath' \%o";
+	}
     }
 
     # Output
