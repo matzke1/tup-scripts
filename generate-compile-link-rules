@@ -750,6 +750,7 @@ sub generate_link_rules {
 
     my $lang = linker_language(keys %{$sources});
     my $uc_compiler = TupScripts::compiler_exe($lang);
+    my @rpath_list = split /:/, $rpath;
 
     # Get the list of linker inputs
     my @linker_inputs;
@@ -810,11 +811,21 @@ sub generate_link_rules {
 	my($lib_dirname) = TupScripts::directory_name($lib);
 	push @linker_order_inputs, $lib unless $lib =~ /^\//; # absolute names are not managed by Tup
 	if ($lang eq 'cxx' || $lang eq 'c') {
-	    unshift @linker_args, "\@(${uc_compiler}_LIBDIR_SWITCH)$lib_dirname", "\@(${uc_compiler}_RPATH_SWITCH)$lib_dirname", "\@(${uc_compiler}_LIB_SWITCH)$lib_name";
+	    unshift @linker_args, "\@(${uc_compiler}_LIBDIR_SWITCH)$lib_dirname", "\@(${uc_compiler}_LIB_SWITCH)$lib_name";
+	    push @rpath_list, $lib_dirname;
 	} elsif ($lang eq 'd') {
 	    unshift @linker_args, $lib, "\@(${uc_compiler}_L_SWITCH)-rpath", "\@(${uc_compiler}_L_SWITCH)$lib_dirname";
 	} else {
 	    unshift @linker_args, $lib;
+	}
+    }
+
+    # RPATH stuff
+    if (@rpath_list) {
+	my %unique;
+	for my $path (@rpath_list) {
+	    push @linker_args, "\@(${uc_compiler}_RPATH_SWITCH)$path" unless $unique{$path};
+	    $unique{$path} = 1;
 	}
     }
 
@@ -837,9 +848,6 @@ sub generate_link_rules {
 	print " ", join(" ", @compiler_args) if @compiler_args;
 	print " ", join(" ", @linker_args) if @linker_args;
 	print ' $(' . $phase . "LDFLAGS_" . uc($linkage) . ")";
-	if ($rpath ne "" && $linkage eq 'shared') {
-	    print "; \$(TUP_SCRIPTS)/append-rpath '$rpath' \%o";
-	}
     }
 
     # Output
