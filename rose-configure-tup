@@ -88,7 +88,7 @@ makefile_value() {
     sed -n "/^${variable}[ \t]*=/ { s/^${variable}[ \t]*=[ \t]*//p; q }" <"$makefile"
 }
 
-# Give VALUE, YES, and NO
+# Given VALUE, YES, and NO
 #   if VALUE is empty, "no", "none", or "ambivalent" return NO
 #   otherwise return YES
 value_ite() {
@@ -103,7 +103,7 @@ value_ite() {
     esac
 }
 
-# Given a DEFAULT and a VALUE, return one or the other
+# Given a VALUE and DEFAULT, return one or the other
 value_or_else() {
     local value="$1" dflt="$2"
     value_ite "$value" "$value" "$dflt"
@@ -150,7 +150,7 @@ language_vars() {
     done
 }
 
-# Information about the hosting (frontend) compiler
+# Information about the hosting compiler
 host_compiler_vars() {
     if [ -n "$CXX_VENDOR" ]; then
 	echo "CXX_VENDOR=\"$CXX_VENDOR\""
@@ -328,7 +328,6 @@ else
 	dry_run find . -name Makefile -print0 |xargs -0 --no-run-if-empty rm
     fi
 	
-
     # Any files that were just created or modified by ROSE's configure script should be copied
     # into the stash so that Tupfile rules that copy them back out into the build tree will
     # get the latest version rather than overwriting the working copy with an old version. However,
