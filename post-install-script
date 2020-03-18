@@ -1,0 +1,35 @@
+#!/bin/bash
+set -e
+arg0="${0##*/}"
+
+warning() {
+    echo "$arg0" "$@" >&2
+}
+
+prefix=
+while [ "$#" -gt 0 ]; do
+    case "$1" in
+	--prefix-bin=*)
+	    prefix="${1#--prefix-bin=}"
+	    shift
+	    ;;
+	*)
+	    shift
+	    ;;
+    esac
+done
+if [ -z "$prefix" ]; then
+    warning "no installation prefix; nothing for the post installation script to do"
+    exit 0
+fi
+[ -d "$prefix/bin" ] || warning "missing installation directory: $prefix/bin"
+[ -d "$prefix/lib" ] || warning "missing installation directory: $prefix/lib"
+
+for f in "$prefix"/bin/* "$prefix"/lib/lib*.so; do
+    if [ -r "$f" ]; then
+	echo -n "adjusting rpath for $f... " >&2
+        echo $(patchelf --set-rpath "$prefix/lib" "$f" || true)
+    fi
+done
+
+exit 0
