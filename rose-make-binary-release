@@ -346,4 +346,6 @@ create_installer() {
 ########################################################################################################################
 
 parse_command_line "$@"
-create_installer "$(output_name)"
+output_name="$(output_name)"
+create_installer "$output_name"
+echo "$arg0: created binary release: $output_name"
