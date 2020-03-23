@@ -1,7 +1,8 @@
 #!/bin/bash
 set -e
 arg0="${0##*/}"
-source tup-scripts/rose_tool
+dir0="${0%/*}"
+source $dir0/rose_tool
 
 # Command-line defaults
 PROJECT=rose
@@ -124,6 +125,19 @@ parse_command_line() {
     done
     [ "$#" -ne 0 ] && die "incorrect usage"
     return 0
+}
+
+# Make a relative name absolute
+absolute_name() {
+    local name="$1"
+    case "$name" in
+	/*)
+	    echo "$name"
+	    ;;
+	*)
+	    echo "$(pwd)/$name"
+	    ;;
+    esac
 }
 
 # Retrieve a variable from the rose.cfg file that was copied into this project's source tree.
@@ -317,7 +331,7 @@ create_installer() {
 		  --create=partial-installer \
 		  --project-name=bat \
 		  --project-version=$project_version \
-		  --postinstall-bin="$(pwd)/post-install-script" \
+		  --postinstall-bin="$(absolute_name "$dir0/post-install-script")" \
 		  --CC="[$(rose_config CC),$(compiler_usual_name c)]" \
 		  --CXX="[$(rose_config CXX),$(compiler_usual_name c++)]" \
 		  $(dedup $(rose_config PREFIX)/* $(libdirs) $(qt5plugins))
