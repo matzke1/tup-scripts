@@ -147,7 +147,7 @@ absolute_name() {
 rose_config() {
     local var="$1"
     [ -r rose.cfg ] || die "no rose.cfg file; see README.md"
-    sed -nr '/^ROSE_'"$var"'[ \t]*=/ s/^.*?=[ \t]*(.*?)[ \t]*$/\1/p' rose.cfg
+    sed -nr '/^ROSE_'"$var"'[ \t]*=/ s/^[_a-zA-Z0-9]*[ \t]*=[ \t]*(.*?)[ \t]*$/\1/p' rose.cfg
 }
 
 # Obtain a project version number if possible, otherwise the word "unknown".
@@ -211,9 +211,31 @@ mkinstaller_name() {
 libdirs() {
     for arg in $(rose_config LDFLAGS); do
         case "$arg" in
+	    -L/lib*|-L/usr/lib*)
+		# skip these. They should be installed already on the deployment machine and they have symlinks which
+		# cause problems for mkinstaller.
+		: skip
+		;;
             -L*)
                 local libdir="${arg#-L}"
                 echo $libdir
+                ;;
+        esac
+    done
+}
+
+# ROSE prerequisite header files need to be packaged up.
+incdirs() {
+    for arg in $(rose_config CPPFLAGS); do
+        case "$arg" in
+	    -I/usr/include*|-I/include*)
+		# skip these. They should be installed already on the deployment machine and they have symlinks which
+		# cause problems for mkinstaller.
+		: skip
+		;;
+            -I*)
+                local incdir="${arg#-I}"
+                echo $incdir
                 ;;
         esac
     done
@@ -329,6 +351,8 @@ create_installer() {
     mkdir "$tmp"
     trap "rm -rf '$tmp'" EXIT
 
+    rose_config CPPFLAGS
+
     # All paths in the following command need to be CWD independent
     run_and_print -C "$tmp" $mkinstaller \
 		  --create=partial-installer \
@@ -337,7 +361,7 @@ create_installer() {
 		  --postinstall-bin="$(absolute_name "$dir0/post-install-script")" \
 		  --CC="[$(rose_config CC),$(compiler_usual_name c)]" \
 		  --CXX="[$(rose_config CXX),$(compiler_usual_name c++)]" \
-		  $(dedup $(rose_config PREFIX)/* $(libdirs) $(qt5plugins))
+		  $(dedup $(rose_config PREFIX)/* $(incdirs) $(libdirs) $(qt5plugins))
 
     # We don't get here if run_and_print failed.
     mv "$tmp/partial-installer" "$output"
