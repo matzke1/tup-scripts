@@ -32,7 +32,8 @@ usage() {
     echo "    --disabled=REASON | --enabled"
     echo "        Marks this test as being disabled. As far as the build system is"
     echo "        concerned, the test passes. However, it prints the disablement message"
-    echo "        to the tty in red text."
+    echo "        to the tty in red text. If the REASON string is empty then it means the"
+    echo "        same thing as --enabled."
     echo
     echo "    --disabled-if CONDITION REASON"
     echo "        Marks this test as being disable if the condition (a perl expression)"
@@ -215,7 +216,11 @@ while [ "$#" -gt 0 ]; do
 	--disabled)
 	    [ "$#" -gt 1 ] || die "\"$1\" switch expects an argument"
 	    disabled_mesg="$2"
-	    disabled_cond=1
+	    if [ -n "$disabled_mesg" ]; then
+		disabled_cond=1
+	    else
+		disabled_cond=
+	    fi
 	    shift 2
 	    ;;
 	--disabled=*)
