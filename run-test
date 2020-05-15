@@ -230,7 +230,11 @@ while [ "$#" -gt 0 ]; do
 	    ;;
 	--disabled=*)
 	    disabled_mesg="${1#--disabled=}"
-	    disabled_cond=1
+	    if [ -n "$disabled_mesg" ]; then
+		disabled_cond=1
+	    else
+		disabled_cond=
+	    fi
 	    shift
 	    ;;
         --disabled-by)
